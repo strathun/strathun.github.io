@@ -1,0 +1,54 @@
+html{
+  font-family: Palatino,"Palatino Linotype",
+  "Palatino LT STD","Book Antiqua",Times,"Times New Roman",serif;
+}
+
+header{
+	margin: 0px 0px 0px 0px;
+}
+
+body {
+  text-align: center;
+  font-weight: 400;
+  font-size: 1.2rem;
+  line-height: 1.6em;
+}
+
+.header {
+  color: mediumseagreen;
+  background-size: cover;
+  height: 50px;
+  border-width: 100%;
+  text-align: center; 
+  box-shadow: 0px 5px 5px grey;
+}
+
+.article-title{
+  color: mediumseagreen;
+  text-align: left;
+  box-shadow: 5px 5px 5px grey;
+  margin-right: 200px;
+  margin-left: 200px;
+  margin-bottom: 0px;
+}
+
+.sub-title{
+	text-align: left;
+    margin-right: 200px;
+    margin-left: 200px;
+    margin-top: -12px;
+    line-height: 1.4em;
+}
+
+.body-text {
+	text-align: left;
+	margin-right: 200px;
+	margin-left: 200px;
+  border-bottom: 1px solid black;
+  padding-bottom: 30px;
+}
+
+.link{
+  text-decoration:none;
+  box-shadow: 3px 3px 3px grey;
+}
