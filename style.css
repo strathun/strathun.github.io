@@ -27,25 +27,25 @@ body {
   color: mediumseagreen;
   text-align: left;
   box-shadow: 5px 5px 5px grey;
-  margin-right: 200px;
-  margin-left: 200px;
+  margin-right: 16vw;
+  margin-left: 16vw;
   margin-bottom: 0px;
 }
 
 .sub-title{
 	text-align: left;
-    margin-right: 200px;
-    margin-left: 200px;
+    margin-right: 16vw;
+    margin-left: 16vw;
     margin-top: -12px;
     line-height: 1.4em;
 }
 
 .body-text {
 	text-align: left;
-	margin-right: 200px;
-	margin-left: 200px;
-  border-bottom: 1px solid black;
-  padding-bottom: 30px;
+	margin-right: 16vw;
+	margin-left: 16vw;
+  	border-bottom: 1px solid black;
+  	padding-bottom: 30px;
 }
 
 .link{
