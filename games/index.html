@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>game tracker — strathun</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css">
+<style>
+body { max-width: 480px; margin: 0 auto; }
+
+/* ── page layout ── */
+.page { display: none; padding: 16px; padding-bottom: 80px; min-height: calc(100vh - 48px); }
+.page.active { display: block; }
+.page-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
+
+/* ── bottom nav ── */
+.bottom-nav {
+  position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: 480px;
+  background: var(--bg1); border-top: 1px solid var(--border);
+  display: flex; z-index: 100;
+}
+.bnav-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 10px 0 14px; background: none;
+  color: var(--muted); font-size: 10px; gap: 4px; border: none;
+  font-family: var(--font-mono); cursor: pointer; letter-spacing: .04em;
+  transition: color .15s;
+}
+.bnav-btn.active { color: var(--accent); }
+.bnav-icon { font-size: 18px; line-height: 1; }
+
+/* ── cards ── */
+.card { background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; }
+.label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 6px; }
+.section-label { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 20px 0 10px; }
+
+/* ── badge ── */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.badge-pc     { background: #1a2a3a; color: #5ab4f0; }
+.badge-ps     { background: #1a1a3a; color: #7b7bfa; }
+.badge-switch { background: #2a1a1a; color: #f07b5a; }
+
+/* ── timer ── */
+.timer-display {
+  font-size: 46px; font-weight: 600; letter-spacing: -.02em;
+  text-align: center; font-variant-numeric: tabular-nums;
+  color: var(--text); line-height: 1;
+}
+.timer-sub { font-size: 12px; color: var(--muted); text-align: center; margin-top: 6px; }
+.ticker { animation: pulse 1s infinite; display: inline-block; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* ── session list ── */
+.session-item {
+  background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 14px; margin-bottom: 10px; cursor: pointer; transition: border-color .15s;
+}
+.session-item:hover { border-color: var(--border2); }
+.session-game { font-size: 14px; font-weight: 600; }
+.session-meta { font-size: 12px; color: var(--muted); margin-top: 5px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.session-note { font-size: 12px; color: #888; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-style: italic; }
+.manual-tag { font-size: 10px; color: var(--dim); }
+
+/* ── buttons ── */
+button { cursor: pointer; font-family: var(--font-mono); border: none; border-radius: var(--radius); font-size: 13px; transition: opacity .15s, transform .1s; }
+button:active { transform: scale(0.97); }
+.btn-primary { background: var(--accent); color: #fff; padding: 11px 18px; font-weight: 600; width: 100%; }
+.btn-primary:hover { opacity: .88; }
+.btn-sm { background: var(--bg2); color: var(--text); border: 1px solid var(--border); padding: 7px 13px; font-size: 12px; }
+.btn-sm:hover { border-color: var(--border2); }
+.btn-success { background: #0f2a1e; color: var(--accent2); border: 1px solid #1a3d2d; padding: 11px 18px; font-weight: 600; width: 100%; }
+.btn-danger  { background: #2a1616; color: var(--danger); border: 1px solid #3a2020; padding: 11px 18px; font-weight: 600; width: 100%; }
+
+/* ── form ── */
+input, textarea, select {
+  background: var(--bg2); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 10px 12px; font-size: 13px;
+  font-family: var(--font-mono); width: 100%; outline: none; transition: border .15s;
+}
+input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+input[type="datetime-local"]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(.4); cursor: pointer; }
+.field { margin-bottom: 14px; }
+
+/* ── platform pills ── */
+.platform-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.platform-pill {
+  padding: 7px 14px; border-radius: var(--radius); font-size: 12px; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--border); background: var(--bg2); color: var(--muted);
+  transition: all .15s; font-family: var(--font-mono);
+}
+.platform-pill.active-pc     { background: #1a2a3a; color: #5ab4f0; border-color: #3a6a8a; }
+.platform-pill.active-ps     { background: #1a1a3a; color: #7b7bfa; border-color: #4a4a8a; }
+.platform-pill.active-switch { background: #2a1a1a; color: #f07b5a; border-color: #8a5a3a; }
+
+/* ── autocomplete ── */
+.autocomplete-list {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+  margin-top: 4px; overflow: hidden; max-height: 150px; overflow-y: auto;
+}
+.autocomplete-item { padding: 10px 12px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.autocomplete-item:last-child { border-bottom: none; }
+.autocomplete-item:hover { background: var(--bg1); }
+
+/* ── overlay / bottom sheet ── */
+.overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 200; align-items: flex-end; justify-content: center; }
+.overlay.open { display: flex; }
+.sheet { background: #18181c; border: 1px solid var(--border); border-radius: 16px 16px 0 0; padding: 24px; width: 100%; max-width: 480px; max-height: 87vh; overflow-y: auto; }
+.sheet-title { font-size: 15px; font-weight: 600; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; }
+.close-btn { background: none; border: none; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer; padding: 0; }
+
+/* ── calendar ── */
+.cal-header-row { display: grid; grid-template-columns: repeat(7,1fr); gap: 2px; margin-bottom: 4px; }
+.cal-day-name { text-align: center; font-size: 10px; color: var(--muted); padding: 4px 0; }
+.cal-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 2px; }
+.cal-day { min-height: 42px; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 4px 2px; cursor: pointer; background: var(--bg1); transition: background .1s; }
+.cal-day.empty { background: none; cursor: default; }
+.cal-day.has-session { background: #1d1b35; }
+.cal-day.today { border: 1px solid var(--accent); }
+.cal-day.selected { background: #2a2450; }
+.cal-day-num { font-size: 12px; line-height: 1; }
+.cal-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); margin-top: 4px; }
+.cal-multi { font-size: 9px; color: var(--accent); margin-top: 1px; }
+
+/* ── stats ── */
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat-card { background: var(--bg2); border-radius: var(--radius); padding: 14px; }
+.stat-val { font-size: 20px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.stat-lbl { font-size: 10px; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: .06em; }
+.bar-wrap { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.bar-label { font-size: 12px; color: var(--text); width: 90px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { flex: 1; height: 6px; background: var(--bg2); border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 3px; background: var(--accent); }
+.bar-val { font-size: 11px; color: var(--muted); width: 38px; text-align: right; flex-shrink: 0; }
+
+/* ── tabs ── */
+.tab-row { display: flex; gap: 8px; margin-bottom: 16px; }
+.tab-btn { flex: 1; padding: 8px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted); font-size: 12px; cursor: pointer; font-family: var(--font-mono); transition: all .15s; }
+.tab-btn.active { background: #1d1b35; color: var(--accent); border-color: #3d3570; }
+
+/* ── misc ── */
+.empty-state { text-align: center; padding: 50px 20px; color: var(--muted); font-size: 13px; }
+.duration-inputs { display: flex; gap: 8px; align-items: flex-end; }
+.duration-inputs input { text-align: center; }
+.dur-unit { font-size: 10px; color: var(--muted); margin-bottom: 6px; }
+.loading-msg { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 12px; }
+.toast {
+  position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 18px; font-size: 13px; color: var(--text); z-index: 300;
+  opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap;
+}
+.toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="logo"><a href="/" style="color:inherit;text-decoration:none">str<span style="color:var(--accent)">@</span>thun</a></div>
+  <div class="nav-links">
+    <a href="/">hub</a>
+    <a href="/games/" class="active">games</a>
+  </div>
+  <div class="nav-user">
+    <span id="nav-email"></span>
+    <button onclick="window.signOut()">sign out</button>
+  </div>
+</nav>
+
+<div id="auth-gate" class="hidden"></div>
+<div id="app" class="hidden">
+
+  <!-- LOG PAGE -->
+  <div id="page-log" class="page active">
+    <div class="page-title">
+      gamelog
+      <div style="display:flex;gap:8px">
+        <button class="btn-sm" onclick="openManual()">+ manual</button>
+        <button class="btn-sm" onclick="openNew()" style="background:#1d1b35;color:var(--accent);border-color:#3d3570">▶ start</button>
+      </div>
+    </div>
+
+    <div id="active-card" style="display:none" class="card">
+      <div class="label">now playing <span class="ticker" style="color:var(--accent)">●</span></div>
+      <div id="as-game" style="font-size:17px;font-weight:600;margin-bottom:6px"></div>
+      <div style="margin-bottom:14px"><span id="as-platform" class="badge"></span></div>
+      <div class="timer-display" id="timer-display">00:00:00</div>
+      <div class="timer-sub" id="timer-sub"></div>
+      <div class="field" style="margin-top:14px">
+        <div class="label">note</div>
+        <textarea id="session-note-input" rows="2" placeholder="how's it going..."></textarea>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <button class="btn-success" style="flex:1" onclick="stopSession()">⏹ stop</button>
+        <button class="btn-danger" style="flex:1" onclick="discardSession()">✕ discard</button>
+      </div>
+    </div>
+
+    <div id="no-session-card" class="card" style="text-align:center;padding:28px 16px">
+      <div style="font-size:28px;margin-bottom:10px">🎮</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px">no active session</div>
+      <div style="font-size:12px;color:var(--muted)">tap ▶ start or + manual to log time</div>
+    </div>
+
+    <div class="section-label">recent sessions</div>
+    <div id="sessions-list"></div>
+  </div>
+
+  <!-- CALENDAR PAGE -->
+  <div id="page-cal" class="page">
+    <div class="page-title">calendar</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <button class="btn-sm" onclick="calPrev()">‹</button>
+      <div id="cal-month-label" style="font-size:14px;font-weight:600"></div>
+      <button class="btn-sm" onclick="calNext()">›</button>
+    </div>
+    <div class="cal-header-row">
+      <div class="cal-day-name">Su</div><div class="cal-day-name">Mo</div><div class="cal-day-name">Tu</div>
+      <div class="cal-day-name">We</div><div class="cal-day-name">Th</div><div class="cal-day-name">Fr</div>
+      <div class="cal-day-name">Sa</div>
+    </div>
+    <div id="cal-grid" class="cal-grid"></div>
+    <div id="cal-detail" style="margin-top:16px"></div>
+  </div>
+
+  <!-- STATS PAGE -->
+  <div id="page-stats" class="page">
+    <div class="page-title">stats</div>
+    <div class="tab-row">
+      <button class="tab-btn active" onclick="switchTab('week',this)">this week</button>
+      <button class="tab-btn" onclick="switchTab('month',this)">this month</button>
+      <button class="tab-btn" onclick="switchTab('all',this)">all time</button>
+    </div>
+    <div id="stats-content"></div>
+  </div>
+
+</div><!-- /#app -->
+
+<nav class="bottom-nav" id="bottom-nav" style="display:none">
+  <button class="bnav-btn active" onclick="showPage('log',this)">
+    <span class="bnav-icon">◉</span><span>log</span>
+  </button>
+  <button class="bnav-btn" onclick="showPage('cal',this)">
+    <span class="bnav-icon">▦</span><span>calendar</span>
+  </button>
+  <button class="bnav-btn" onclick="showPage('stats',this)">
+    <span class="bnav-icon">▲</span><span>stats</span>
+  </button>
+</nav>
+
+<!-- OVERLAYS -->
+<div id="overlay-new" class="overlay">
+  <div class="sheet">
+    <div class="sheet-title">new session <button class="close-btn" onclick="closeOverlay('overlay-new')">×</button></div>
+    <div class="field">
+      <div class="label">game</div>
+      <input id="n-game" type="text" placeholder="search or type..." autocomplete="off" oninput="filterGames('n-game','n-sugg')" onfocus="filterGames('n-game','n-sugg')">
+      <div id="n-sugg" class="autocomplete-list" style="display:none"></div>
+    </div>
+    <div class="field">
+      <div class="label">platform</div>
+      <div class="platform-pills" id="pills-new">
+        <div class="platform-pill" data-p="PC" onclick="selPlat(this,'pills-new')">PC/Steam</div>
+        <div class="platform-pill" data-p="PS" onclick="selPlat(this,'pills-new')">PlayStation</div>
+        <div class="platform-pill" data-p="Switch" onclick="selPlat(this,'pills-new')">Switch</div>
+      </div>
+    </div>
+    <button class="btn-primary" onclick="startSession()">▶ start session</button>
+  </div>
+</div>
+
+<div id="overlay-manual" class="overlay">
+  <div class="sheet">
+    <div class="sheet-title">add manual session <button class="close-btn" onclick="closeOverlay('overlay-manual')">×</button></div>
+    <div class="field">
+      <div class="label">game</div>
+      <input id="m-game" type="text" placeholder="search or type..." autocomplete="off" oninput="filterGames('m-game','m-sugg')" onfocus="filterGames('m-game','m-sugg')">
+      <div id="m-sugg" class="autocomplete-list" style="display:none"></div>
+    </div>
+    <div class="field">
+      <div class="label">platform</div>
+      <div class="platform-pills" id="pills-manual">
+        <div class="platform-pill" data-p="PC" onclick="selPlat(this,'pills-manual')">PC/Steam</div>
+        <div class="platform-pill" data-p="PS" onclick="selPlat(this,'pills-manual')">PlayStation</div>
+        <div class="platform-pill" data-p="Switch" onclick="selPlat(this,'pills-manual')">Switch</div>
+      </div>
+    </div>
+    <div class="field">
+      <div class="label">date &amp; start time</div>
+      <input id="m-start" type="datetime-local">
+    </div>
+    <div class="field">
+      <div class="label">duration</div>
+      <div class="duration-inputs">
+        <div style="flex:1"><div class="dur-unit">hours</div><input id="m-h" type="number" min="0" max="24" placeholder="0" style="text-align:center"></div>
+        <div style="color:var(--muted);padding-bottom:10px;font-size:18px">:</div>
+        <div style="flex:1"><div class="dur-unit">minutes</div><input id="m-m" type="number" min="0" max="59" placeholder="0" style="text-align:center"></div>
+      </div>
+    </div>
+    <div class="field"><div class="label">note (optional)</div><textarea id="m-note" rows="2" placeholder="session notes..."></textarea></div>
+    <button class="btn-primary" onclick="saveManual()">save session</button>
+  </div>
+</div>
+
+<div id="overlay-detail" class="overlay">
+  <div class="sheet">
+    <div class="sheet-title" id="detail-title">session <button class="close-btn" onclick="closeOverlay('overlay-detail')">×</button></div>
+    <div id="detail-body"></div>
+  </div>
+</div>
+
+<div id="overlay-edit" class="overlay">
+  <div class="sheet">
+    <div class="sheet-title">edit session <button class="close-btn" onclick="closeOverlay('overlay-edit')">×</button></div>
+    <div class="field">
+      <div class="label">game</div>
+      <input id="e-game" type="text" autocomplete="off" oninput="filterGames('e-game','e-sugg')" onfocus="filterGames('e-game','e-sugg')">
+      <div id="e-sugg" class="autocomplete-list" style="display:none"></div>
+    </div>
+    <div class="field">
+      <div class="label">platform</div>
+      <div class="platform-pills" id="pills-edit">
+        <div class="platform-pill" data-p="PC" onclick="selPlat(this,'pills-edit')">PC/Steam</div>
+        <div class="platform-pill" data-p="PS" onclick="selPlat(this,'pills-edit')">PlayStation</div>
+        <div class="platform-pill" data-p="Switch" onclick="selPlat(this,'pills-edit')">Switch</div>
+      </div>
+    </div>
+    <div class="field"><div class="label">date &amp; start time</div><input id="e-start" type="datetime-local"></div>
+    <div class="field">
+      <div class="label">duration</div>
+      <div class="duration-inputs">
+        <div style="flex:1"><div class="dur-unit">hours</div><input id="e-h" type="number" min="0" max="24" placeholder="0" style="text-align:center"></div>
+        <div style="color:var(--muted);padding-bottom:10px;font-size:18px">:</div>
+        <div style="flex:1"><div class="dur-unit">minutes</div><input id="e-m" type="number" min="0" max="59" placeholder="0" style="text-align:center"></div>
+      </div>
+    </div>
+    <div class="field"><div class="label">note (optional)</div><textarea id="e-note" rows="2"></textarea></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn-primary" style="flex:2" onclick="saveEdit()">save changes</button>
+      <button class="btn-danger" style="flex:1" onclick="deleteEditing()">delete</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="/assets/auth.js"></script>
+<script>
+const GAMES = ["Elden Ring","Baldur's Gate 3","The Witcher 3","Cyberpunk 2077","Red Dead Redemption 2","God of War","God of War Ragnarök","Hades","Hades II","Dead Cells","Hollow Knight","Celeste","Stardew Valley","Animal Crossing","Pokémon Scarlet","Pokémon Violet","Zelda: Tears of the Kingdom","Zelda: Breath of the Wild","Mario Kart 8","Super Mario Odyssey","Metroid Dread","Splatoon 3","Persona 5 Royal","Final Fantasy XVI","Final Fantasy XIV","Monster Hunter World","Monster Hunter Rise","Dark Souls III","Sekiro","Bloodborne","Lies of P","Armored Core VI","Ghost of Tsushima","Spider-Man 2","The Last of Us","Horizon Forbidden West","Gran Turismo 7","Call of Duty","Apex Legends","Valorant","League of Legends","Dota 2","Counter-Strike 2","Overwatch 2","Fortnite","Minecraft","Terraria","Factorio","Satisfactory","Valheim","Palworld","Path of Exile","Diablo IV","World of Warcraft","Destiny 2","Warframe","Deep Rock Galactic","Dave the Diver","Vampire Survivors","Cult of the Lamb","Disco Elysium","Hi-Fi Rush","Alan Wake 2","Resident Evil 4","Street Fighter 6","Tekken 8","NBA 2K24","Rocket League"];
+
+let currentUser = null;
+let sessions = [];
+let activeSession = null;
+let timerInterval = null;
+let platSel = {};
+let calDate = new Date();
+let selCalDay = null;
+let statTab = 'week';
+let editingId = null;
+
+// ── AUTH + INIT ──────────────────────────────────────────────
+window.renderAuthGate(async (user) => {
+  currentUser = user;
+  document.getElementById('nav-email').textContent = user.email;
+  document.getElementById('auth-gate').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('bottom-nav').style.display = 'flex';
+  await loadSessions();
+  restoreActiveSession();
+});
+
+// ── SUPABASE CRUD ────────────────────────────────────────────
+async function loadSessions() {
+  document.getElementById('sessions-list').innerHTML = '<div class="loading-msg">loading...</div>';
+  const { data, error } = await window.sb
+    .from('game_sessions')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .order('start_time', { ascending: false });
+  if (error) { console.error(error); return; }
+  sessions = (data || []).map(dbToLocal);
+  renderSessionsList();
+  renderStats();
+  renderCal();
+}
+
+function dbToLocal(row) {
+  return {
+    id: row.id,
+    game: row.game,
+    platform: row.platform,
+    start: new Date(row.start_time).getTime(),
+    end: new Date(row.end_time).getTime(),
+    duration: row.duration_ms,
+    note: row.note || '',
+    manual: row.manual || false,
+  };
+}
+
+async function insertSession(s) {
+  const { data, error } = await window.sb.from('game_sessions').insert({
+    user_id: currentUser.id,
+    game: s.game,
+    platform: s.platform,
+    start_time: new Date(s.start).toISOString(),
+    end_time: new Date(s.end).toISOString(),
+    duration_ms: s.duration,
+    note: s.note || '',
+    manual: s.manual || false,
+  }).select().single();
+  if (error) { toast('error saving session'); console.error(error); return null; }
+  return dbToLocal(data);
+}
+
+async function updateSession(s) {
+  const { error } = await window.sb.from('game_sessions').update({
+    game: s.game,
+    platform: s.platform,
+    start_time: new Date(s.start).toISOString(),
+    end_time: new Date(s.end).toISOString(),
+    duration_ms: s.duration,
+    note: s.note || '',
+  }).eq('id', s.id).eq('user_id', currentUser.id);
+  if (error) { toast('error updating session'); console.error(error); }
+}
+
+async function deleteSession(id) {
+  const { error } = await window.sb.from('game_sessions').delete().eq('id', id).eq('user_id', currentUser.id);
+  if (error) { toast('error deleting session'); console.error(error); }
+}
+
+// ── ACTIVE SESSION (localStorage for live timer state) ───────
+function restoreActiveSession() {
+  try {
+    const raw = localStorage.getItem('gt_active');
+    if (raw) { activeSession = JSON.parse(raw); showActiveCard(); }
+  } catch (e) {}
+}
+function saveActiveLocal() {
+  if (activeSession) localStorage.setItem('gt_active', JSON.stringify(activeSession));
+  else localStorage.removeItem('gt_active');
+}
+
+// ── PAGES ────────────────────────────────────────────────────
+function showPage(name, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.bnav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'stats') renderStats();
+  if (name === 'cal') renderCal();
+}
+
+// ── NEW SESSION OVERLAY ──────────────────────────────────────
+function openNew() {
+  if (activeSession) { toast('stop current session first'); return; }
+  document.getElementById('n-game').value = '';
+  document.getElementById('n-sugg').style.display = 'none';
+  platSel['new'] = '';
+  document.querySelectorAll('#pills-new .platform-pill').forEach(p => p.className = 'platform-pill');
+  document.getElementById('overlay-new').classList.add('open');
+  setTimeout(() => document.getElementById('n-game').focus(), 120);
+}
+
+async function startSession() {
+  const game = document.getElementById('n-game').value.trim();
+  const plat = platSel['new'] || '';
+  if (!game) { toast('enter a game name'); return; }
+  if (!plat) { toast('select a platform'); return; }
+  activeSession = { game, platform: plat, start: Date.now(), note: '' };
+  saveActiveLocal();
+  closeOverlay('overlay-new');
+  showActiveCard();
+}
+
+function showActiveCard() {
+  if (!activeSession) return;
+  document.getElementById('active-card').style.display = 'block';
+  document.getElementById('no-session-card').style.display = 'none';
+  document.getElementById('as-game').textContent = activeSession.game;
+  const pb = document.getElementById('as-platform');
+  pb.textContent = activeSession.platform;
+  pb.className = 'badge badge-' + platKey(activeSession.platform);
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(tick, 500);
+  tick();
+}
+
+function tick() {
+  if (!activeSession) return;
+  const e = Math.floor((Date.now() - activeSession.start) / 1000);
+  const h = Math.floor(e / 3600), m = Math.floor((e % 3600) / 60), s = e % 60;
+  document.getElementById('timer-display').textContent = pad(h) + ':' + pad(m) + ':' + pad(s);
+  document.getElementById('timer-sub').textContent = 'started ' + new Date(activeSession.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+async function stopSession() {
+  if (!activeSession) return;
+  clearInterval(timerInterval);
+  activeSession.note = document.getElementById('session-note-input').value.trim();
+  activeSession.end = Date.now();
+  activeSession.duration = activeSession.end - activeSession.start;
+  const saved = await insertSession(activeSession);
+  if (saved) { sessions.unshift(saved); renderSessionsList(); renderStats(); renderCal(); }
+  activeSession = null; saveActiveLocal();
+  document.getElementById('active-card').style.display = 'none';
+  document.getElementById('no-session-card').style.display = 'block';
+  document.getElementById('session-note-input').value = '';
+  toast('session saved ✓');
+}
+
+function discardSession() {
+  if (!confirm('Discard this session?')) return;
+  clearInterval(timerInterval);
+  activeSession = null; saveActiveLocal();
+  document.getElementById('active-card').style.display = 'none';
+  document.getElementById('no-session-card').style.display = 'block';
+  document.getElementById('session-note-input').value = '';
+}
+
+// ── MANUAL SESSION ───────────────────────────────────────────
+function openManual() {
+  document.getElementById('m-game').value = '';
+  document.getElementById('m-sugg').style.display = 'none';
+  document.getElementById('m-note').value = '';
+  document.getElementById('m-h').value = '';
+  document.getElementById('m-m').value = '';
+  platSel['manual'] = '';
+  document.querySelectorAll('#pills-manual .platform-pill').forEach(p => p.className = 'platform-pill');
+  const now = new Date(); now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  document.getElementById('m-start').value = now.toISOString().slice(0, 16);
+  document.getElementById('overlay-manual').classList.add('open');
+}
+
+async function saveManual() {
+  const game = document.getElementById('m-game').value.trim();
+  const plat = platSel['manual'] || '';
+  const startVal = document.getElementById('m-start').value;
+  const h = parseInt(document.getElementById('m-h').value) || 0;
+  const m = parseInt(document.getElementById('m-m').value) || 0;
+  if (!game) { toast('enter a game name'); return; }
+  if (!plat) { toast('select a platform'); return; }
+  if (!startVal) { toast('enter a start time'); return; }
+  if (h === 0 && m === 0) { toast('enter a duration'); return; }
+  const startTs = new Date(startVal).getTime();
+  const dur = (h * 60 + m) * 60000;
+  const s = { game, platform: plat, start: startTs, end: startTs + dur, duration: dur, note: document.getElementById('m-note').value.trim(), manual: true };
+  const saved = await insertSession(s);
+  if (saved) {
+    sessions.unshift(saved);
+    sessions.sort((a, b) => b.start - a.start);
+    renderSessionsList(); renderStats(); renderCal();
+    closeOverlay('overlay-manual');
+    toast('session added ✓');
+  }
+}
+
+// ── DETAIL ───────────────────────────────────────────────────
+function showDetail(id) {
+  const s = sessions.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('detail-title').innerHTML = `${s.game} <button class="close-btn" onclick="closeOverlay('overlay-detail')">×</button>`;
+  document.getElementById('detail-body').innerHTML = `
+    <div style="margin-bottom:12px">${platBadge(s.platform)}${s.manual ? '<span class="manual-tag" style="margin-left:8px">manual</span>' : ''}</div>
+    <div class="stat-grid" style="margin-bottom:14px">
+      <div class="stat-card"><div class="stat-val">${fmtDur(s.duration)}</div><div class="stat-lbl">duration</div></div>
+      <div class="stat-card"><div class="stat-val">${fmtDate(s.start)}</div><div class="stat-lbl">date</div></div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">${new Date(s.start).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} → ${new Date(s.end).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
+    ${s.note ? `<div style="margin-bottom:14px;padding:12px;background:var(--bg2);border-radius:var(--radius);font-size:12px;color:#888;font-style:italic">${s.note}</div>` : ''}
+    <div style="display:flex;gap:10px">
+      <button class="btn-primary" style="flex:2" onclick="openEdit('${s.id}')">edit</button>
+      <button class="btn-danger" style="flex:1" onclick="confirmDelete('${s.id}')">delete</button>
+    </div>`;
+  document.getElementById('overlay-detail').classList.add('open');
+}
+
+// ── EDIT ─────────────────────────────────────────────────────
+function openEdit(id) {
+  const s = sessions.find(x => x.id === id);
+  if (!s) return;
+  editingId = id;
+  document.getElementById('e-game').value = s.game;
+  document.getElementById('e-sugg').style.display = 'none';
+  document.getElementById('e-note').value = s.note || '';
+  document.getElementById('e-h').value = Math.floor(s.duration / 3600000);
+  document.getElementById('e-m').value = Math.floor((s.duration % 3600000) / 60000);
+  const sl = new Date(s.start); sl.setMinutes(sl.getMinutes() - sl.getTimezoneOffset());
+  document.getElementById('e-start').value = sl.toISOString().slice(0, 16);
+  platSel['edit'] = s.platform;
+  document.querySelectorAll('#pills-edit .platform-pill').forEach(p => {
+    p.className = 'platform-pill';
+    if (p.dataset.p === s.platform) p.classList.add('active-' + platKey(s.platform));
+  });
+  closeOverlay('overlay-detail');
+  document.getElementById('overlay-edit').classList.add('open');
+}
+
+async function saveEdit() {
+  const game = document.getElementById('e-game').value.trim();
+  const plat = platSel['edit'] || '';
+  const startVal = document.getElementById('e-start').value;
+  const h = parseInt(document.getElementById('e-h').value) || 0;
+  const m = parseInt(document.getElementById('e-m').value) || 0;
+  if (!game) { toast('enter a game name'); return; }
+  if (!plat) { toast('select a platform'); return; }
+  if (!startVal) { toast('enter a start time'); return; }
+  if (h === 0 && m === 0) { toast('enter a duration'); return; }
+  const startTs = new Date(startVal).getTime();
+  const dur = (h * 60 + m) * 60000;
+  const idx = sessions.findIndex(x => x.id === editingId);
+  if (idx === -1) return;
+  const updated = { ...sessions[idx], game, platform: plat, start: startTs, end: startTs + dur, duration: dur, note: document.getElementById('e-note').value.trim() };
+  await updateSession(updated);
+  sessions[idx] = updated;
+  sessions.sort((a, b) => b.start - a.start);
+  renderSessionsList(); renderStats(); renderCal();
+  closeOverlay('overlay-edit');
+  toast('session updated ✓');
+}
+
+async function deleteEditing() {
+  if (!confirm('Delete this session?')) return;
+  await deleteSession(editingId);
+  sessions = sessions.filter(s => s.id !== editingId);
+  renderSessionsList(); renderStats(); renderCal();
+  closeOverlay('overlay-edit');
+  toast('session deleted');
+}
+
+async function confirmDelete(id) {
+  if (!confirm('Delete this session?')) return;
+  await deleteSession(id);
+  sessions = sessions.filter(s => s.id !== id);
+  renderSessionsList(); renderStats(); renderCal();
+  closeOverlay('overlay-detail');
+  toast('session deleted');
+}
+
+// ── RENDER SESSIONS ──────────────────────────────────────────
+function renderSessionsList() {
+  const el = document.getElementById('sessions-list');
+  if (!sessions.length) { el.innerHTML = '<div class="empty-state">no sessions yet</div>'; return; }
+  el.innerHTML = sessions.slice(0, 40).map(s => `
+    <div class="session-item" onclick="showDetail('${s.id}')">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between">
+        <div class="session-game">${s.game}</div>
+        ${s.manual ? '<span class="manual-tag">manual</span>' : ''}
+      </div>
+      <div class="session-meta">
+        ${platBadge(s.platform)}
+        <span>${fmtDate(s.start)}</span>
+        <span style="color:var(--accent2);font-weight:600">${fmtDur(s.duration)}</span>
+      </div>
+      ${s.note ? `<div class="session-note">${s.note}</div>` : ''}
+    </div>`).join('');
+}
+
+// ── CALENDAR ─────────────────────────────────────────────────
+function renderCal() {
+  const y = calDate.getFullYear(), m = calDate.getMonth();
+  document.getElementById('cal-month-label').textContent = new Date(y, m, 1).toLocaleDateString([], { month: 'long', year: 'numeric' });
+  const first = new Date(y, m, 1).getDay(), days = new Date(y, m + 1, 0).getDate();
+  const today = new Date();
+  const byDay = {};
+  sessions.forEach(s => {
+    const d = new Date(s.start);
+    if (d.getFullYear() === y && d.getMonth() === m) {
+      const k = d.getDate(); if (!byDay[k]) byDay[k] = []; byDay[k].push(s);
+    }
+  });
+  let html = '';
+  for (let i = 0; i < first; i++) html += '<div class="cal-day empty"></div>';
+  for (let d = 1; d <= days; d++) {
+    const isToday = d === today.getDate() && m === today.getMonth() && y === today.getFullYear();
+    const has = byDay[d]; const isSel = selCalDay === d;
+    html += `<div class="cal-day ${has ? 'has-session' : ''} ${isToday ? 'today' : ''} ${isSel ? 'selected' : ''}" onclick="selDay(${d})">
+      <span class="cal-day-num">${d}</span>
+      ${has ? '<div class="cal-dot"></div>' : ''}
+      ${has && has.length > 1 ? `<div class="cal-multi">${has.length}</div>` : ''}
+    </div>`;
+  }
+  document.getElementById('cal-grid').innerHTML = html;
+  if (selCalDay) renderCalDetail(selCalDay, byDay[selCalDay]);
+  else document.getElementById('cal-detail').innerHTML = '';
+}
+
+function selDay(d) {
+  if (selCalDay === d) { selCalDay = null; renderCal(); return; }
+  selCalDay = d; renderCal();
+  const byDay = {};
+  sessions.forEach(s => {
+    const sd = new Date(s.start);
+    if (sd.getFullYear() === calDate.getFullYear() && sd.getMonth() === calDate.getMonth()) {
+      const k = sd.getDate(); if (!byDay[k]) byDay[k] = []; byDay[k].push(s);
+    }
+  });
+  renderCalDetail(d, byDay[d]);
+}
+
+function renderCalDetail(d, daySes) {
+  const el = document.getElementById('cal-detail');
+  const lbl = calDate.toLocaleDateString([], { month: 'short' }) + ' ' + d;
+  if (!daySes || !daySes.length) { el.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:12px;padding:16px">no sessions on ${lbl}</div>`; return; }
+  const total = daySes.reduce((a, s) => a + s.duration, 0);
+  el.innerHTML = `<div class="section-label">${lbl} — ${fmtDur(total)} total</div>` +
+    daySes.map(s => `<div class="session-item" onclick="showDetail('${s.id}')">
+      <div class="session-game">${s.game}</div>
+      <div class="session-meta">${platBadge(s.platform)}<span style="color:var(--accent2);font-weight:600">${fmtDur(s.duration)}</span></div>
+      ${s.note ? `<div class="session-note">${s.note}</div>` : ''}
+    </div>`).join('');
+}
+
+function calPrev() { calDate = new Date(calDate.getFullYear(), calDate.getMonth() - 1, 1); selCalDay = null; renderCal(); }
+function calNext() { calDate = new Date(calDate.getFullYear(), calDate.getMonth() + 1, 1); selCalDay = null; renderCal(); }
+
+// ── STATS ─────────────────────────────────────────────────────
+function switchTab(tab, btn) {
+  statTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderStats();
+}
+
+function getFiltered() {
+  const now = Date.now();
+  if (statTab === 'week') return sessions.filter(x => x.start >= now - 7 * 86400000);
+  if (statTab === 'month') return sessions.filter(x => x.start >= now - 30 * 86400000);
+  return sessions;
+}
+
+function renderStats() {
+  const el = document.getElementById('stats-content');
+  const f = getFiltered();
+  if (!f.length) { el.innerHTML = '<div class="empty-state">no data yet</div>'; return; }
+  const total = f.reduce((a, s) => a + s.duration, 0);
+  const avg = total / f.length;
+  const gameMap = {}, platMap = {};
+  f.forEach(s => { gameMap[s.game] = (gameMap[s.game] || 0) + s.duration; platMap[s.platform] = (platMap[s.platform] || 0) + s.duration; });
+  const sortedGames = Object.entries(gameMap).sort((a, b) => b[1] - a[1]);
+  const days = new Set(f.map(s => new Date(s.start).toDateString()));
+  const maxGame = sortedGames[0] ? sortedGames[0][1] : 1;
+  const longest = f.reduce((a, s) => s.duration > a.duration ? s : a, f[0]);
+  const streak = computeStreak();
+  el.innerHTML = `
+    <div class="stat-grid" style="margin-bottom:14px">
+      <div class="stat-card"><div class="stat-val">${fmtDur(total)}</div><div class="stat-lbl">total time</div></div>
+      <div class="stat-card"><div class="stat-val">${f.length}</div><div class="stat-lbl">sessions</div></div>
+      <div class="stat-card"><div class="stat-val">${fmtDur(avg)}</div><div class="stat-lbl">avg/session</div></div>
+      <div class="stat-card"><div class="stat-val">${days.size}</div><div class="stat-lbl">days played</div></div>
+    </div>
+    ${streak > 0 ? `<div class="card" style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">
+      <div><div class="label">current streak</div><div style="font-size:20px;font-weight:600;color:var(--warn)">${streak} day${streak !== 1 ? 's' : ''}</div></div>
+      <div style="font-size:26px">🔥</div>
+    </div>` : ''}
+    <div class="section-label">by game</div>
+    <div class="card" style="margin-bottom:14px">
+      ${sortedGames.map(([g, ms]) => `<div class="bar-wrap">
+        <div class="bar-label" title="${g}">${g}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.round(ms / maxGame * 100)}%"></div></div>
+        <div class="bar-val">${fmtDur(ms)}</div>
+      </div>`).join('')}
+    </div>
+    <div class="section-label">by platform</div>
+    <div class="card" style="margin-bottom:14px">
+      ${Object.entries(platMap).sort((a, b) => b[1] - a[1]).map(([p, ms]) => `<div class="bar-wrap">
+        <div class="bar-label">${platBadge(p)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.round(ms / total * 100)}%"></div></div>
+        <div class="bar-val">${Math.round(ms / total * 100)}%</div>
+      </div>`).join('')}
+    </div>
+    ${longest ? `<div class="section-label">longest session</div>
+    <div class="session-item" style="margin-bottom:14px" onclick="showDetail('${longest.id}')">
+      <div class="session-game">${longest.game}</div>
+      <div class="session-meta">${platBadge(longest.platform)}<span>${fmtDate(longest.start)}</span><span style="color:var(--accent2);font-weight:600">${fmtDur(longest.duration)}</span></div>
+    </div>` : ''}
+    ${statTab === 'all' ? renderMonthly() : ''}`;
+}
+
+function renderMonthly() {
+  const byMonth = {};
+  sessions.forEach(s => {
+    const d = new Date(s.start);
+    const k = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    byMonth[k] = (byMonth[k] || 0) + s.duration;
+  });
+  const months = Object.entries(byMonth).sort((a, b) => a[0].localeCompare(b[0])).slice(-6);
+  if (!months.length) return '';
+  const maxMs = Math.max(...months.map(m => m[1]));
+  return `<div class="section-label">monthly (last 6)</div><div class="card">
+    ${months.map(([k, ms]) => {
+      const [y, m] = k.split('-');
+      const lbl = new Date(parseInt(y), parseInt(m) - 1, 1).toLocaleDateString([], { month: 'short', year: '2-digit' });
+      return `<div class="bar-wrap"><div class="bar-label">${lbl}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.round(ms / maxMs * 100)}%"></div></div><div class="bar-val">${fmtDur(ms)}</div></div>`;
+    }).join('')}
+  </div>`;
+}
+
+function computeStreak() {
+  const played = new Set(sessions.map(s => new Date(s.start).toDateString()));
+  let streak = 0, d = new Date();
+  while (played.has(d.toDateString())) { streak++; d.setDate(d.getDate() - 1); }
+  return streak;
+}
+
+// ── HELPERS ──────────────────────────────────────────────────
+function filterGames(inputId, listId) {
+  const val = document.getElementById(inputId).value.trim().toLowerCase();
+  const box = document.getElementById(listId);
+  const known = [...new Set([...GAMES, ...sessions.map(s => s.game)])];
+  const filtered = val ? known.filter(g => g.toLowerCase().includes(val)) : known.slice(0, 8);
+  if (!filtered.length) { box.style.display = 'none'; return; }
+  box.innerHTML = filtered.slice(0, 8).map(g => `<div class="autocomplete-item" onclick="pickGame('${g.replace(/'/g, "&#39;")}','${inputId}','${listId}')">${g}</div>`).join('');
+  box.style.display = 'block';
+}
+function pickGame(g, inputId, listId) {
+  document.getElementById(inputId).value = g;
+  document.getElementById(listId).style.display = 'none';
+}
+
+function selPlat(el, groupId) {
+  const p = el.dataset.p;
+  platSel[groupId.replace('pills-', '')] = p;
+  document.querySelectorAll('#' + groupId + ' .platform-pill').forEach(x => x.className = 'platform-pill');
+  el.classList.add('active-' + platKey(p));
+}
+
+function platKey(p) { return p === 'PC' ? 'pc' : p === 'PS' ? 'ps' : 'switch'; }
+function platBadge(p) { return `<span class="badge badge-${platKey(p)}">${p}</span>`; }
+function pad(n) { return String(n).padStart(2, '0'); }
+function fmtDur(ms) { const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000); return h === 0 ? m + 'm' : h + 'h ' + m + 'm'; }
+function fmtDate(ts) { return new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' }); }
+function closeOverlay(id) { document.getElementById(id).classList.remove('open'); }
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+document.addEventListener('click', function (e) {
+  ['n-game/n-sugg', 'm-game/m-sugg', 'e-game/e-sugg'].forEach(pair => {
+    const [inp, list] = pair.split('/');
+    if (!e.target.closest('#' + inp) && !e.target.closest('#' + list))
+      document.getElementById(list).style.display = 'none';
+  });
+});
+</script>
+</body>
+</html>
