@@ -809,8 +809,12 @@ function computeStreak() {
 function filterGames(inputId, listId) {
   const val = document.getElementById(inputId).value.trim().toLowerCase();
   const box = document.getElementById(listId);
-  const known = [...new Set([...GAMES, ...sessions.map(s => s.game)])];
-  const filtered = val ? known.filter(g => g.toLowerCase().includes(val)) : known.slice(0, 8);
+  // sessions is sorted newest-first, so iterating gives most-recent unique games first
+  const seen = new Set();
+  const recentGames = [];
+  sessions.forEach(s => { if (!seen.has(s.game)) { seen.add(s.game); recentGames.push(s.game); } });
+  const allGames = [...recentGames, ...GAMES.filter(g => !seen.has(g))];
+  const filtered = val ? allGames.filter(g => g.toLowerCase().includes(val)) : allGames.slice(0, 8);
   if (!filtered.length) { box.style.display = 'none'; return; }
   box.innerHTML = filtered.slice(0, 8).map(g => `<div class="autocomplete-item" onclick="pickGame('${g.replace(/'/g, "&#39;")}','${inputId}','${listId}')">${g}</div>`).join('');
   box.style.display = 'block';
