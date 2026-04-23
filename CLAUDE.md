@@ -138,7 +138,7 @@ npx serve .
 Supabase works on localhost — you're hitting the real database.
 `http://localhost:8080` should be added to Supabase → Authentication → URL Configuration → Redirect URLs.
 
-**Deploy:** just `git push origin main` — GitHub Pages auto-deploys within ~60 seconds.
+**Deploy:** just `git push origin master` — GitHub Pages auto-deploys within ~60 seconds.
 No build step, no CI needed.
 
 ---
