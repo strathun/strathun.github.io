@@ -162,6 +162,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { filter: invert
   <div class="nav-links">
     <a href="/">hub</a>
     <a href="/games/" class="active">games</a>
+    <a href="/games/library/">library</a>
   </div>
   <div class="nav-user">
     <span id="nav-email"></span>
@@ -192,7 +193,22 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { filter: invert
         <div class="label">note</div>
         <textarea id="session-note-input" rows="2" placeholder="how's it going..."></textarea>
       </div>
-      <div style="display:flex;gap:10px;margin-top:8px">
+      <div id="puh-section" style="display:none;margin-top:14px">
+        <div class="label" style="display:flex;align-items:center">pick up here <span id="puh-save-status" style="font-size:10px;color:var(--accent2);opacity:0;transition:opacity .3s;margin-left:8px">saved</span></div>
+        <textarea id="puh-input" rows="2" placeholder="where you left off..." oninput="schedulePuhSave()"></textarea>
+      </div>
+      <div id="todos-section" style="display:none;margin-top:10px">
+        <button id="todos-toggle-btn" class="btn-sm" onclick="toggleActiveTodos()" style="width:100%;text-align:left">todos ▸</button>
+        <div id="todos-body" style="display:none;margin-top:8px">
+          <div id="active-todos-list"></div>
+          <div id="active-done-section"></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <input id="active-todo-input" type="text" placeholder="add a todo..." onkeydown="if(event.key==='Enter')addActiveTodo()">
+            <button class="btn-sm" onclick="addActiveTodo()">+</button>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:14px">
         <button class="btn-success" style="flex:1" onclick="stopSession()">⏹ stop</button>
         <button class="btn-danger" style="flex:1" onclick="discardSession()">✕ discard</button>
       </div>
@@ -247,6 +263,9 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { filter: invert
   </button>
   <button class="bnav-btn" onclick="showPage('stats',this)">
     <span class="bnav-icon">▲</span><span>stats</span>
+  </button>
+  <button class="bnav-btn" onclick="window.location.href='/games/library/'">
+    <span class="bnav-icon">◫</span><span>library</span>
   </button>
 </nav>
 
@@ -359,6 +378,11 @@ let calDate = new Date();
 let selCalDay = null;
 let statTab = 'week';
 let editingId = null;
+let activeTodos = [];
+let activeTodosOpen = false;
+let activeDoneOpen = false;
+let puhSaveTimer = null;
+let puhStatusTimer = null;
 
 // ── AUTH + INIT ──────────────────────────────────────────────
 window.renderAuthGate(async (user) => {
@@ -486,6 +510,7 @@ function showActiveCard() {
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(tick, 500);
   tick();
+  loadGameData(activeSession.game);
 }
 
 function tick() {
@@ -508,6 +533,7 @@ async function stopSession() {
   document.getElementById('active-card').style.display = 'none';
   document.getElementById('no-session-card').style.display = 'block';
   document.getElementById('session-note-input').value = '';
+  resetGameDataUI();
   toast('session saved ✓');
 }
 
@@ -518,6 +544,7 @@ function discardSession() {
   document.getElementById('active-card').style.display = 'none';
   document.getElementById('no-session-card').style.display = 'block';
   document.getElementById('session-note-input').value = '';
+  resetGameDataUI();
 }
 
 // ── MANUAL SESSION ───────────────────────────────────────────
@@ -803,6 +830,115 @@ function computeStreak() {
   let streak = 0, d = new Date();
   while (played.has(d.toDateString())) { streak++; d.setDate(d.getDate() - 1); }
   return streak;
+}
+
+// ── GAME DATA (pick up here + todos) ─────────────────────────
+async function loadGameData(game) {
+  const [puhRes, todosRes] = await Promise.all([
+    window.sb.from('games').select('pick_up_here').eq('user_id', currentUser.id).eq('game', game).maybeSingle(),
+    window.sb.from('game_todos').select('*').eq('user_id', currentUser.id).eq('game', game).order('created_at', { ascending: true })
+  ]);
+  document.getElementById('puh-input').value = puhRes.data?.pick_up_here || '';
+  activeTodos = todosRes.data || [];
+  document.getElementById('puh-section').style.display = 'block';
+  document.getElementById('todos-section').style.display = 'block';
+  renderActiveTodos();
+}
+
+function resetGameDataUI() {
+  activeTodos = [];
+  activeTodosOpen = false;
+  activeDoneOpen = false;
+  document.getElementById('puh-section').style.display = 'none';
+  document.getElementById('todos-section').style.display = 'none';
+  document.getElementById('puh-input').value = '';
+  document.getElementById('todos-body').style.display = 'none';
+  document.getElementById('todos-toggle-btn').textContent = 'todos ▸';
+}
+
+function schedulePuhSave() {
+  clearTimeout(puhSaveTimer);
+  puhSaveTimer = setTimeout(saveActivePuh, 800);
+}
+
+async function saveActivePuh() {
+  if (!activeSession) return;
+  const text = document.getElementById('puh-input').value;
+  const { error } = await window.sb.from('games').upsert(
+    { user_id: currentUser.id, game: activeSession.game, pick_up_here: text, updated_at: new Date().toISOString() },
+    { onConflict: 'user_id,game' }
+  );
+  if (error) { toast('error saving note'); return; }
+  const st = document.getElementById('puh-save-status');
+  if (st) {
+    st.style.opacity = '1';
+    clearTimeout(puhStatusTimer);
+    puhStatusTimer = setTimeout(() => { st.style.opacity = '0'; }, 1200);
+  }
+}
+
+function toggleActiveTodos() {
+  activeTodosOpen = !activeTodosOpen;
+  document.getElementById('todos-body').style.display = activeTodosOpen ? 'block' : 'none';
+  document.getElementById('todos-toggle-btn').textContent = 'todos ' + (activeTodosOpen ? '▾' : '▸');
+}
+
+function renderActiveTodos() {
+  const icons = { todo: '○', in_progress: '◐', done: '●' };
+  const colors = { todo: 'var(--muted)', in_progress: 'var(--warn)', done: 'var(--accent2)' };
+  const active = activeTodos.filter(t => t.status !== 'done');
+  const done = activeTodos.filter(t => t.status === 'done');
+
+  document.getElementById('active-todos-list').innerHTML = active.length
+    ? active.map(t => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+        <button onclick="cycleActiveTodo('${t.id}','${t.status}')" style="background:none;border:none;color:${colors[t.status]};font-size:16px;padding:0;cursor:pointer;width:22px;font-family:var(--font-mono)">${icons[t.status]}</button>
+        <span style="flex:1;font-size:13px">${t.text}</span>
+        <button onclick="deleteActiveTodo('${t.id}')" style="background:none;border:none;color:var(--dim);font-size:16px;padding:0 4px;cursor:pointer">×</button>
+      </div>`).join('')
+    : '<div style="font-size:12px;color:var(--dim);padding:6px 0">no open todos</div>';
+
+  const doneEl = document.getElementById('active-done-section');
+  if (done.length) {
+    doneEl.innerHTML = `<button onclick="toggleActiveDone()" style="background:none;border:none;color:var(--muted);font-size:11px;font-family:var(--font-mono);cursor:pointer;padding:4px 0">${activeDoneOpen ? '▾' : '▸'} ${done.length} done</button>` +
+      (activeDoneOpen ? `<div>${done.map(t => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);opacity:.4">
+          <button onclick="cycleActiveTodo('${t.id}','${t.status}')" style="background:none;border:none;color:${colors[t.status]};font-size:16px;padding:0;cursor:pointer;width:22px;font-family:var(--font-mono)">${icons[t.status]}</button>
+          <span style="flex:1;font-size:13px;text-decoration:line-through">${t.text}</span>
+          <button onclick="deleteActiveTodo('${t.id}')" style="background:none;border:none;color:var(--dim);font-size:16px;padding:0 4px;cursor:pointer">×</button>
+        </div>`).join('')}</div>` : '');
+  } else {
+    doneEl.innerHTML = '';
+  }
+}
+
+function toggleActiveDone() { activeDoneOpen = !activeDoneOpen; renderActiveTodos(); }
+
+async function addActiveTodo() {
+  const inp = document.getElementById('active-todo-input');
+  const text = inp.value.trim();
+  if (!text || !activeSession) return;
+  inp.value = '';
+  const { data, error } = await window.sb.from('game_todos').insert({
+    user_id: currentUser.id, game: activeSession.game, text, status: 'todo'
+  }).select().single();
+  if (error) { toast('error adding todo'); return; }
+  activeTodos.push(data);
+  renderActiveTodos();
+}
+
+async function cycleActiveTodo(id, current) {
+  const next = { todo: 'in_progress', in_progress: 'done', done: 'todo' }[current];
+  const { error } = await window.sb.from('game_todos').update({ status: next }).eq('id', id).eq('user_id', currentUser.id);
+  if (error) { toast('error updating todo'); return; }
+  const t = activeTodos.find(x => x.id === id);
+  if (t) t.status = next;
+  renderActiveTodos();
+}
+
+async function deleteActiveTodo(id) {
+  const { error } = await window.sb.from('game_todos').delete().eq('id', id).eq('user_id', currentUser.id);
+  if (error) { toast('error deleting todo'); return; }
+  activeTodos = activeTodos.filter(t => t.id !== id);
+  renderActiveTodos();
 }
 
 // ── HELPERS ──────────────────────────────────────────────────

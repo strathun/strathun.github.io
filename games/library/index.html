@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>game library — strathun</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css">
+<style>
+body { max-width: 480px; margin: 0 auto; }
+
+.page { padding: 16px; padding-bottom: 80px; min-height: calc(100vh - 48px); }
+.page-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+.label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 6px; }
+.section-divider { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 18px 0 10px; }
+
+/* game list cards */
+.game-card {
+  background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 14px 16px; margin-bottom: 10px; cursor: pointer; transition: border-color .15s;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.game-card:hover { border-color: var(--border2); }
+.game-card-name { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.game-card-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.game-card-time { font-size: 15px; font-weight: 600; color: var(--accent2); text-align: right; }
+.puh-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+
+/* bottom nav */
+.bottom-nav {
+  position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: 480px;
+  background: var(--bg1); border-top: 1px solid var(--border);
+  display: flex; z-index: 100;
+}
+.bnav-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 10px 0 14px;
+  color: var(--muted); font-size: 10px; gap: 4px;
+  font-family: var(--font-mono); cursor: pointer; letter-spacing: .04em;
+  transition: color .15s; text-decoration: none; background: none; border: none;
+}
+.bnav-btn.active { color: var(--accent); }
+.bnav-icon { font-size: 18px; line-height: 1; }
+
+/* overlay / sheet */
+.overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 200; align-items: flex-end; justify-content: center; }
+.overlay.open { display: flex; }
+.sheet { background: #18181c; border: 1px solid var(--border); border-radius: 16px 16px 0 0; padding: 24px; width: 100%; max-width: 480px; max-height: 87vh; overflow-y: auto; }
+.sheet-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0; }
+.close-btn { background: none; border: none; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer; padding: 0; font-family: var(--font-mono); }
+
+/* stats */
+.stat-row { display: flex; gap: 10px; margin: 14px 0 18px; }
+.stat-card { background: var(--bg2); border-radius: var(--radius); padding: 12px; flex: 1; }
+.stat-val { font-size: 18px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.stat-lbl { font-size: 10px; color: var(--muted); margin-top: 3px; text-transform: uppercase; letter-spacing: .06em; }
+
+/* pick up here */
+textarea {
+  background: var(--bg2); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 10px 12px; font-size: 13px;
+  font-family: var(--font-mono); width: 100%; outline: none; transition: border .15s;
+  resize: vertical; box-sizing: border-box;
+}
+textarea:focus { border-color: var(--accent); }
+input[type="text"] {
+  background: var(--bg2); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 10px 12px; font-size: 13px;
+  font-family: var(--font-mono); outline: none; transition: border .15s; box-sizing: border-box;
+}
+input[type="text"]:focus { border-color: var(--accent); }
+.save-badge { font-size: 10px; color: var(--accent2); margin-left: 8px; opacity: 0; transition: opacity .3s; }
+.save-badge.show { opacity: 1; }
+
+/* todos */
+.todo-item { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.todo-item:last-child { border-bottom: none; }
+.todo-status-btn { background: none; border: none; font-size: 16px; padding: 0; cursor: pointer; width: 22px; flex-shrink: 0; font-family: var(--font-mono); line-height: 1; }
+.todo-text-input { flex: 1; min-width: 0; background: none; border: none; color: var(--text); outline: none; padding: 0; font-size: 13px; font-family: var(--font-mono); }
+.todo-text-input.is-done { opacity: .35; text-decoration: line-through; }
+.todo-del-btn { background: none; border: none; color: var(--dim); font-size: 16px; padding: 0 4px; cursor: pointer; flex-shrink: 0; transition: color .15s; }
+.todo-del-btn:hover { color: var(--danger); }
+.todo-add-row { display: flex; gap: 8px; margin-top: 10px; }
+.todo-add-row input[type="text"] { flex: 1; min-width: 0; }
+.todo-add-btn {
+  background: var(--bg2); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 8px 14px; font-size: 15px;
+  font-family: var(--font-mono); cursor: pointer; flex-shrink: 0; transition: border .15s;
+}
+.todo-add-btn:hover { border-color: var(--border2); }
+.done-toggle-btn { background: none; border: none; color: var(--muted); font-size: 11px; font-family: var(--font-mono); cursor: pointer; padding: 6px 0; display: block; transition: color .15s; }
+.done-toggle-btn:hover { color: var(--text); }
+
+/* misc */
+.empty-state { text-align: center; padding: 50px 20px; color: var(--muted); font-size: 13px; }
+.loading-msg { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 12px; }
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 18px; font-size: 13px; color: var(--text); z-index: 300; opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
+.toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="logo"><a href="/" style="color:inherit;text-decoration:none">str<span style="color:var(--accent)">@</span>thun</a></div>
+  <div class="nav-links">
+    <a href="/">hub</a>
+    <a href="/games/">games</a>
+    <a href="/games/library/" class="active">library</a>
+  </div>
+  <div class="nav-user">
+    <span id="nav-email"></span>
+    <button onclick="window.signOut()">sign out</button>
+  </div>
+</nav>
+
+<div id="auth-gate" class="hidden"></div>
+<div id="app" class="hidden">
+  <div class="page">
+    <div class="page-title">game library</div>
+    <div id="games-list"><div class="loading-msg">loading...</div></div>
+  </div>
+</div>
+
+<nav class="bottom-nav" id="bottom-nav" style="display:none">
+  <a class="bnav-btn" href="/games/"><span class="bnav-icon">◉</span><span>log</span></a>
+  <a class="bnav-btn" href="/games/"><span class="bnav-icon">▦</span><span>calendar</span></a>
+  <a class="bnav-btn" href="/games/"><span class="bnav-icon">▲</span><span>stats</span></a>
+  <a class="bnav-btn active" href="/games/library/"><span class="bnav-icon">◫</span><span>library</span></a>
+</nav>
+
+<div id="overlay-game" class="overlay">
+  <div class="sheet">
+    <div class="sheet-title">
+      <span id="profile-title"></span>
+      <button class="close-btn" onclick="closeProfile()">×</button>
+    </div>
+    <div id="profile-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script src="/assets/auth.js"></script>
+<script>
+/*
+  Required Supabase tables: games, game_todos — see CLAUDE.md for SQL migration.
+*/
+
+let currentUser = null;
+let gameList = [];
+let notesMap = {};
+let openGame = null;
+let openTodos = [];
+let showDone = false;
+let puhDebounce = null;
+let puhStatusTimer = null;
+
+window.renderAuthGate(async (user) => {
+  currentUser = user;
+  document.getElementById('nav-email').textContent = user.email;
+  document.getElementById('auth-gate').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('bottom-nav').style.display = 'flex';
+  await loadLibrary();
+});
+
+// ── LIBRARY ──────────────────────────────────────────────────
+async function loadLibrary() {
+  const [sessRes, gameRes] = await Promise.all([
+    window.sb.from('game_sessions').select('game, duration_ms').eq('user_id', currentUser.id),
+    window.sb.from('games').select('game, pick_up_here').eq('user_id', currentUser.id)
+  ]);
+  if (sessRes.error) { toast('error loading library'); return; }
+
+  notesMap = {};
+  (gameRes.data || []).forEach(e => { notesMap[e.game] = e.pick_up_here; });
+
+  const map = {};
+  (sessRes.data || []).forEach(s => {
+    if (!map[s.game]) map[s.game] = { game: s.game, totalMs: 0, count: 0 };
+    map[s.game].totalMs += s.duration_ms;
+    map[s.game].count++;
+  });
+  gameList = Object.values(map).sort((a, b) => b.totalMs - a.totalMs);
+  renderLibrary();
+}
+
+function renderLibrary() {
+  const el = document.getElementById('games-list');
+  if (!gameList.length) { el.innerHTML = '<div class="empty-state">no games logged yet</div>'; return; }
+  el.innerHTML = gameList.map(g => {
+    const safeName = esc(g.game);
+    const hasPuh = notesMap[g.game] && notesMap[g.game].trim();
+    return `<div class="game-card" data-game="${safeName}" onclick="openProfile(this.dataset.game)">
+      <div>
+        <div class="game-card-name">${safeName}${hasPuh ? '<span class="puh-dot" title="has note"></span>' : ''}</div>
+        <div class="game-card-meta">${g.count} session${g.count !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="game-card-time">${fmtDur(g.totalMs)}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── GAME PROFILE ─────────────────────────────────────────────
+async function openProfile(game) {
+  openGame = game;
+  showDone = false;
+  document.getElementById('profile-title').textContent = game;
+  document.getElementById('profile-body').innerHTML = '<div class="loading-msg">loading...</div>';
+  document.getElementById('overlay-game').classList.add('open');
+
+  const [puhRes, todosRes, sessRes] = await Promise.all([
+    window.sb.from('games').select('pick_up_here').eq('user_id', currentUser.id).eq('game', game).maybeSingle(),
+    window.sb.from('game_todos').select('*').eq('user_id', currentUser.id).eq('game', game).order('created_at', { ascending: true }),
+    window.sb.from('game_sessions').select('duration_ms').eq('user_id', currentUser.id).eq('game', game)
+  ]);
+
+  openTodos = todosRes.data || [];
+  const puh = puhRes.data?.pick_up_here || '';
+  const totalMs = (sessRes.data || []).reduce((a, s) => a + s.duration_ms, 0);
+  const count = sessRes.data?.length || 0;
+
+  document.getElementById('profile-body').innerHTML = `
+    <div class="stat-row">
+      <div class="stat-card"><div class="stat-val">${fmtDur(totalMs)}</div><div class="stat-lbl">total time</div></div>
+      <div class="stat-card"><div class="stat-val">${count}</div><div class="stat-lbl">sessions</div></div>
+    </div>
+    <div style="margin-bottom:18px">
+      <div class="label" style="display:flex;align-items:center;margin-bottom:6px">
+        pick up here<span id="puh-status" class="save-badge">saved</span>
+      </div>
+      <textarea id="puh-field" rows="3" placeholder="where you left off..."></textarea>
+    </div>
+    <div class="section-divider">todos</div>
+    <div id="todo-active-list"></div>
+    <div id="todo-done-section"></div>
+    <div class="todo-add-row">
+      <input type="text" id="todo-new-input" placeholder="add a todo..." onkeydown="if(event.key==='Enter')addTodo()">
+      <button class="todo-add-btn" onclick="addTodo()">+</button>
+    </div>`;
+
+  document.getElementById('puh-field').value = puh;
+  document.getElementById('puh-field').addEventListener('input', () => {
+    clearTimeout(puhDebounce);
+    puhDebounce = setTimeout(savePuh, 800);
+  });
+
+  renderTodos();
+}
+
+function closeProfile() { document.getElementById('overlay-game').classList.remove('open'); }
+
+// ── TODOS ─────────────────────────────────────────────────────
+function renderTodos() {
+  const icons = { todo: '○', in_progress: '◐', done: '●' };
+  const colors = { todo: 'var(--muted)', in_progress: 'var(--warn)', done: 'var(--accent2)' };
+  const active = openTodos.filter(t => t.status !== 'done');
+  const done = openTodos.filter(t => t.status === 'done');
+
+  const activeEl = document.getElementById('todo-active-list');
+  if (!activeEl) return;
+  activeEl.innerHTML = active.length
+    ? active.map(t => `<div class="todo-item">
+        <button class="todo-status-btn" style="color:${colors[t.status]}" onclick="cycleTodo('${t.id}','${t.status}')">${icons[t.status]}</button>
+        <input class="todo-text-input" value="${esc(t.text)}" onblur="saveTodoText('${t.id}',this.value)" onkeydown="if(event.key==='Enter')this.blur()">
+        <button class="todo-del-btn" onclick="deleteTodo('${t.id}')">×</button>
+      </div>`).join('')
+    : '<div style="font-size:12px;color:var(--dim);padding:8px 0">no open todos</div>';
+
+  const doneEl = document.getElementById('todo-done-section');
+  if (!doneEl) return;
+  if (done.length) {
+    doneEl.innerHTML = `<button class="done-toggle-btn" onclick="toggleDone()">${showDone ? '▾' : '▸'} ${done.length} done</button>` +
+      (showDone ? `<div>${done.map(t => `<div class="todo-item" style="opacity:.4">
+          <button class="todo-status-btn" style="color:${colors[t.status]}" onclick="cycleTodo('${t.id}','${t.status}')">${icons[t.status]}</button>
+          <input class="todo-text-input is-done" value="${esc(t.text)}" onblur="saveTodoText('${t.id}',this.value)" onkeydown="if(event.key==='Enter')this.blur()">
+          <button class="todo-del-btn" onclick="deleteTodo('${t.id}')">×</button>
+        </div>`).join('')}</div>` : '');
+  } else {
+    doneEl.innerHTML = '';
+  }
+}
+
+function toggleDone() { showDone = !showDone; renderTodos(); }
+
+async function addTodo() {
+  const inp = document.getElementById('todo-new-input');
+  const text = inp.value.trim();
+  if (!text) return;
+  inp.value = '';
+  const { data, error } = await window.sb.from('game_todos').insert({
+    user_id: currentUser.id, game: openGame, text, status: 'todo'
+  }).select().single();
+  if (error) { toast('error adding todo'); return; }
+  openTodos.push(data);
+  renderTodos();
+}
+
+async function cycleTodo(id, current) {
+  const next = { todo: 'in_progress', in_progress: 'done', done: 'todo' }[current];
+  const { error } = await window.sb.from('game_todos').update({ status: next }).eq('id', id).eq('user_id', currentUser.id);
+  if (error) { toast('error updating todo'); return; }
+  const t = openTodos.find(x => x.id === id);
+  if (t) t.status = next;
+  renderTodos();
+}
+
+async function saveTodoText(id, text) {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  const { error } = await window.sb.from('game_todos').update({ text: trimmed }).eq('id', id).eq('user_id', currentUser.id);
+  if (error) { toast('error saving todo'); return; }
+  const t = openTodos.find(x => x.id === id);
+  if (t) t.text = trimmed;
+}
+
+async function deleteTodo(id) {
+  const { error } = await window.sb.from('game_todos').delete().eq('id', id).eq('user_id', currentUser.id);
+  if (error) { toast('error deleting todo'); return; }
+  openTodos = openTodos.filter(t => t.id !== id);
+  renderTodos();
+}
+
+// ── PICK UP HERE ─────────────────────────────────────────────
+async function savePuh() {
+  const field = document.getElementById('puh-field');
+  if (!field) return;
+  const text = field.value;
+  const { error } = await window.sb.from('games').upsert(
+    { user_id: currentUser.id, game: openGame, pick_up_here: text, updated_at: new Date().toISOString() },
+    { onConflict: 'user_id,game' }
+  );
+  if (error) { toast('error saving note'); return; }
+  notesMap[openGame] = text;
+  renderLibrary();
+  const st = document.getElementById('puh-status');
+  if (st) {
+    st.classList.add('show');
+    clearTimeout(puhStatusTimer);
+    puhStatusTimer = setTimeout(() => st.classList.remove('show'), 1500);
+  }
+}
+
+// ── HELPERS ──────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtDur(ms) {
+  const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+  return h === 0 ? m + 'm' : h + 'h ' + m + 'm';
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+</script>
+</body>
+</html>

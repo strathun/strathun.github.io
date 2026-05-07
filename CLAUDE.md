@@ -84,6 +84,28 @@ Avoid gradients, heavy shadows, or flashy effects. Precision and readability ove
 
 ## Supabase Schema
 
+### `games`
+| column | type | notes |
+|--------|------|-------|
+| id | uuid | primary key, auto |
+| user_id | uuid | references auth.users, cascade delete |
+| game | text | game title |
+| pick_up_here | text | sticky note for where user left off |
+| created_at | timestamptz | auto |
+| updated_at | timestamptz | updated on save |
+
+Unique constraint on `(user_id, game)`. Upserted on conflict.
+
+### `game_todos`
+| column | type | notes |
+|--------|------|-------|
+| id | uuid | primary key, auto |
+| user_id | uuid | references auth.users, cascade delete |
+| game | text | game title |
+| text | text | todo item text |
+| status | text | `todo`, `in_progress`, or `done` (check constraint) |
+| created_at | timestamptz | auto |
+
 ### `game_sessions`
 | column | type | notes |
 |--------|------|-------|
@@ -160,6 +182,7 @@ No build step, no CI needed.
 | App | Path | Supabase tables |
 |-----|------|-----------------|
 | Game Tracker | `/games/` | `game_sessions` |
+| Game Library | `/games/library/` | `games`, `game_todos` |
 
 ---
 
