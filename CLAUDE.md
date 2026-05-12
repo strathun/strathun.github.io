@@ -120,6 +120,18 @@ Unique constraint on `(user_id, game)`. Upserted on conflict.
 | manual | boolean | true if manually entered |
 | created_at | timestamptz | auto |
 
+### `travel_trips`
+| column | type | notes |
+|--------|------|-------|
+| id | uuid | primary key, auto |
+| user_id | uuid | references auth.users, cascade delete |
+| destination | text | trip destination |
+| notes | text | freeform notes |
+| start_date | date | inclusive |
+| end_date | date | inclusive |
+| status | text | `tentative` or `confirmed` (check constraint) |
+| created_at | timestamptz | auto |
+
 RLS is enabled — users can only read/write their own rows.
 
 **When adding tables for new apps:** always enable RLS and add the four standard policies (select/insert/update/delete scoped to `auth.uid() = user_id`). Write the SQL in a comment block at the top of the app's `index.html` for reference.
@@ -183,6 +195,18 @@ No build step, no CI needed.
 |-----|------|-----------------|
 | Game Tracker | `/games/` | `game_sessions` |
 | Game Library | `/games/library/` | `games`, `game_todos` |
+| Travel Planner | `/travel/` | `travel_trips` |
+
+---
+
+## Travel Planner (travel.html)
+- Year-view calendar for planning trips across the full year
+- Auth via /assets/auth.js, Supabase via window.sb (same as game tracker)
+- Trips stored in travel_trips table (uuid, user_id, destination, notes, start_date, end_date, status)
+- Status is either tentative (muted/dashed style) or confirmed (solid/vivid)
+- Trips added via "Add Trip" modal with date pickers — no drag-to-select
+- Clicking an existing trip opens edit/delete modal
+- Mobile-first layout, 3×4 or 4×3 month grid
 
 ---
 

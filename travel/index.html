@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>travel planner — strathun</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css">
+<!--
+  Supabase setup — run once in SQL Editor:
+
+  create table if not exists travel_trips (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid references auth.users(id) on delete cascade not null,
+    destination text not null,
+    notes text default '',
+    start_date date not null,
+    end_date date not null,
+    status text not null check (status in ('tentative','confirmed')),
+    created_at timestamptz default now()
+  );
+
+  alter table travel_trips enable row level security;
+
+  create policy "Users can view own trips"   on travel_trips for select using (auth.uid() = user_id);
+  create policy "Users can insert own trips" on travel_trips for insert with check (auth.uid() = user_id);
+  create policy "Users can update own trips" on travel_trips for update using (auth.uid() = user_id);
+  create policy "Users can delete own trips" on travel_trips for delete using (auth.uid() = user_id);
+
+  create index if not exists travel_trips_user_date on travel_trips(user_id, start_date);
+-->
+<style>
+  body { max-width: 960px; margin: 0 auto; padding: 16px; padding-bottom: 60px; }
+
+  /* ── header row ── */
+  .travel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 10px; margin-bottom: 16px;
+  }
+  .travel-title { font-size: 16px; font-weight: 600; }
+  .travel-title small {
+    color: var(--muted); font-size: 12px; margin-left: 8px; font-weight: 400;
+  }
+  .add-trip-btn {
+    background: var(--accent); color: #fff; border: none;
+    padding: 8px 14px; border-radius: var(--radius);
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: opacity .15s;
+  }
+  .add-trip-btn:hover { opacity: 0.88; }
+
+  /* ── year nav ── */
+  .year-nav {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 4px; margin: 0 auto 20px; max-width: 240px;
+  }
+  .year-nav button {
+    background: none; border: none; color: var(--muted); padding: 6px 12px;
+    border-radius: 4px; cursor: pointer; font-family: var(--font-mono); font-size: 14px;
+    transition: color .15s, background .15s;
+  }
+  .year-nav button:hover { color: var(--text); background: var(--bg2); }
+  .year-nav .year-display {
+    font-size: 14px; font-weight: 600; color: var(--text);
+    min-width: 64px; text-align: center; font-variant-numeric: tabular-nums;
+  }
+
+  /* ── year grid ── */
+  .year-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  @media (min-width: 600px) {
+    .year-grid { grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  }
+  @media (min-width: 960px) {
+    .year-grid { grid-template-columns: repeat(4, 1fr); }
+  }
+
+  .month-card {
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 8px 8px;
+  }
+  .month-name {
+    font-size: 11px; font-weight: 600; color: var(--text);
+    text-transform: uppercase; letter-spacing: .1em;
+    margin-bottom: 8px; padding: 0 2px;
+    display: flex; align-items: baseline; justify-content: space-between;
+  }
+  .month-name .month-trips {
+    font-size: 9px; color: var(--muted); font-weight: 400; letter-spacing: .04em;
+  }
+
+  .month-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 1px;
+  }
+  .dow {
+    font-size: 8px; text-align: center; color: var(--dim);
+    text-transform: uppercase; letter-spacing: .04em;
+    padding: 1px 0 3px;
+  }
+  .day-cell {
+    aspect-ratio: 1 / 1;
+    font-size: 9px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted);
+    border-radius: 3px;
+    background: transparent;
+    transition: transform .1s;
+    position: relative;
+    cursor: default;
+    font-variant-numeric: tabular-nums;
+  }
+  .day-cell.empty { background: transparent; color: transparent; }
+  .day-cell.today {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+    color: var(--text);
+    font-weight: 600;
+  }
+  .day-cell.trip { cursor: pointer; }
+  .day-cell.trip:active { transform: scale(0.92); }
+  .day-cell.trip.confirmed {
+    color: #0d0d0f;
+    font-weight: 600;
+  }
+  .day-cell.trip.tentative {
+    /* color/border set inline per-trip */
+  }
+
+  /* ── trips list ── */
+  .trips-section { margin-top: 28px; }
+  .trips-section-title {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--muted); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .trips-section-title::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+  .trip-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; background: var(--bg1); border: 1px solid var(--border);
+    border-radius: var(--radius); margin-bottom: 8px; cursor: pointer;
+    transition: border-color .15s, background .15s, transform .1s;
+  }
+  .trip-row:hover { border-color: var(--border2); background: var(--bg2); }
+  .trip-row:active { transform: scale(0.99); }
+  .trip-row .swatch {
+    width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0;
+  }
+  .trip-row .trip-info { flex: 1; min-width: 0; }
+  .trip-row .trip-dest {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .trip-row .trip-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .trip-row .trip-status {
+    font-size: 9px; text-transform: uppercase; letter-spacing: .1em; font-weight: 600;
+    padding: 3px 7px; border-radius: 3px; flex-shrink: 0;
+  }
+  .trip-row .trip-status.tentative {
+    color: var(--warn); border: 1px dashed rgba(240,160,64,.4);
+  }
+  .trip-row .trip-status.confirmed {
+    color: var(--accent2); background: rgba(78,207,168,.1);
+  }
+
+  .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 12px; }
+
+  /* ── modal ── */
+  .overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7);
+    z-index: 200; align-items: center; justify-content: center; padding: 20px;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    background: #18181c; border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 22px; width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto;
+  }
+  .modal-title {
+    font-size: 15px; font-weight: 600; margin-bottom: 18px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .close-btn {
+    background: none; border: none; color: var(--muted); font-size: 22px;
+    line-height: 1; cursor: pointer; padding: 0;
+  }
+  .close-btn:hover { color: var(--text); }
+
+  .field { margin-bottom: 14px; }
+  .field label {
+    display: block; font-size: 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px;
+  }
+  input, textarea {
+    background: var(--bg2); border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius); padding: 10px 12px; font-size: 13px;
+    font-family: var(--font-mono); width: 100%; outline: none; transition: border .15s;
+  }
+  input:focus, textarea:focus { border-color: var(--accent); }
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(.5); cursor: pointer; }
+  textarea { resize: vertical; min-height: 64px; }
+
+  .date-row { display: flex; gap: 10px; }
+  .date-row .field { flex: 1; margin-bottom: 14px; }
+
+  .status-pills { display: flex; gap: 8px; }
+  .status-pill {
+    flex: 1; padding: 9px; border-radius: var(--radius);
+    background: var(--bg2); border: 1px solid var(--border); color: var(--muted);
+    cursor: pointer; font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+    text-align: center; transition: all .15s;
+  }
+  .status-pill:hover { border-color: var(--border2); color: var(--text); }
+  .status-pill.active-tentative {
+    background: rgba(240,160,64,.08); color: var(--warn);
+    border: 1px dashed rgba(240,160,64,.5);
+  }
+  .status-pill.active-confirmed {
+    background: rgba(78,207,168,.08); color: var(--accent2);
+    border-color: rgba(78,207,168,.5);
+  }
+
+  .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+  .modal-actions button {
+    padding: 11px 14px; border-radius: var(--radius);
+    font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+    cursor: pointer; border: none; transition: opacity .15s, background .15s;
+  }
+  .modal-actions .btn-save { flex: 1; background: var(--accent); color: #fff; }
+  .modal-actions .btn-save:hover { opacity: .88; }
+  .modal-actions .btn-delete {
+    flex: 0 0 auto;
+    background: #2a1616; color: var(--danger); border: 1px solid #3a2020;
+  }
+  .modal-actions .btn-delete:hover { background: #3a1c1c; }
+
+  .modal-error {
+    font-size: 12px; color: var(--danger); margin-top: 10px; min-height: 16px;
+  }
+
+  /* ── toast ── */
+  .toast {
+    position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 18px; font-size: 13px; color: var(--text); z-index: 300;
+    opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+
+  .loading-msg { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="logo"><a href="/" style="color:inherit;text-decoration:none">str<span style="color:var(--accent)">@</span>thun</a></div>
+  <div class="nav-links">
+    <a href="/">hub</a>
+    <a href="/games/">games</a>
+    <a href="/games/library/">library</a>
+    <a href="/travel/" class="active">travel</a>
+  </div>
+  <div class="nav-user">
+    <span id="nav-email"></span>
+    <button onclick="window.signOut()">sign out</button>
+  </div>
+</nav>
+
+<div id="auth-gate" class="hidden"></div>
+
+<div id="app" class="hidden">
+  <div class="travel-header">
+    <div class="travel-title">trips <small id="trip-count"></small></div>
+    <button class="add-trip-btn" onclick="openTripModal()">+ add trip</button>
+  </div>
+
+  <div class="year-nav">
+    <button onclick="changeYear(-1)" aria-label="previous year">◀</button>
+    <div class="year-display" id="year-display">—</div>
+    <button onclick="changeYear(1)" aria-label="next year">▶</button>
+  </div>
+
+  <div id="year-grid" class="year-grid"></div>
+
+  <div class="trips-section">
+    <div class="trips-section-title" id="trips-list-title">trips</div>
+    <div id="trips-list"><div class="loading-msg">loading...</div></div>
+  </div>
+</div>
+
+<!-- ── Trip modal ── -->
+<div class="overlay" id="trip-modal">
+  <div class="modal">
+    <div class="modal-title">
+      <span id="modal-title-text">new trip</span>
+      <button class="close-btn" onclick="closeTripModal()">×</button>
+    </div>
+    <div class="field">
+      <label>destination</label>
+      <input id="trip-destination" placeholder="tokyo, kyoto, ...">
+    </div>
+    <div class="date-row">
+      <div class="field">
+        <label>start</label>
+        <input id="trip-start" type="date">
+      </div>
+      <div class="field">
+        <label>end</label>
+        <input id="trip-end" type="date">
+      </div>
+    </div>
+    <div class="field">
+      <label>status</label>
+      <div class="status-pills">
+        <div class="status-pill" id="pill-tentative" onclick="setStatus('tentative')">tentative</div>
+        <div class="status-pill" id="pill-confirmed" onclick="setStatus('confirmed')">confirmed</div>
+      </div>
+    </div>
+    <div class="field">
+      <label>notes</label>
+      <textarea id="trip-notes" rows="3" placeholder="flights, hotels, things to do..."></textarea>
+    </div>
+    <div class="modal-error" id="modal-error"></div>
+    <div class="modal-actions">
+      <button class="btn-delete hidden" id="trip-delete-btn" onclick="deleteTrip()">delete</button>
+      <button class="btn-save" onclick="saveTrip()">save</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/assets/auth.js"></script>
+<script>
+let currentUser = null;
+let currentYear = new Date().getFullYear();
+let trips = [];
+let editingTripId = null;
+let editingStatus = 'tentative';
+
+// Distinguishable colors that read well against the dark bg.
+// Color per trip is stable — derived from the trip id hash.
+const TRIP_COLORS = [
+  '#7c6dfa', // purple   (accent)
+  '#4ecfa8', // teal     (accent2)
+  '#f0a040', // orange   (warn)
+  '#5ab4f0', // blue
+  '#f07b5a', // coral
+  '#b878f0', // lavender
+  '#f0d050', // yellow
+  '#7adf8f', // green
+];
+
+function colorForTrip(trip) {
+  let h = 0;
+  for (let i = 0; i < trip.id.length; i++) h = (h * 31 + trip.id.charCodeAt(i)) | 0;
+  return TRIP_COLORS[Math.abs(h) % TRIP_COLORS.length];
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function ymd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function formatDateRange(start, end) {
+  const s = new Date(start + 'T00:00:00');
+  const e = new Date(end + 'T00:00:00');
+  const opts = { month: 'short', day: 'numeric' };
+  if (start === end) return s.toLocaleDateString([], opts);
+  if (s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth())
+    return `${s.toLocaleDateString([], opts)} – ${e.getDate()}`;
+  if (s.getFullYear() === e.getFullYear())
+    return `${s.toLocaleDateString([], opts)} – ${e.toLocaleDateString([], opts)}`;
+  const fullOpts = { year: 'numeric', month: 'short', day: 'numeric' };
+  return `${s.toLocaleDateString([], fullOpts)} – ${e.toLocaleDateString([], fullOpts)}`;
+}
+
+function tripDurationDays(start, end) {
+  const s = new Date(start + 'T00:00:00');
+  const e = new Date(end + 'T00:00:00');
+  return Math.round((e - s) / 86400000) + 1;
+}
+
+function changeYear(delta) {
+  currentYear += delta;
+  document.getElementById('year-display').textContent = currentYear;
+  renderYear();
+  renderTripsList();
+}
+
+async function loadTrips() {
+  const { data, error } = await window.sb
+    .from('travel_trips')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .order('start_date', { ascending: true });
+  if (error) { toast('failed to load trips'); console.error(error); return; }
+  trips = data || [];
+  const c = document.getElementById('trip-count');
+  c.textContent = trips.length ? `(${trips.length})` : '';
+  renderYear();
+  renderTripsList();
+}
+
+function renderYear() {
+  const grid = document.getElementById('year-grid');
+  const todayStr = ymd(new Date());
+  const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  const dowNames = ['s','m','t','w','t','f','s'];
+
+  let html = '';
+  for (let m = 0; m < 12; m++) {
+    const daysInMonth = new Date(currentYear, m + 1, 0).getDate();
+    const startDow = new Date(currentYear, m, 1).getDay();
+
+    const monthStart = `${currentYear}-${String(m+1).padStart(2,'0')}-01`;
+    const monthEnd = `${currentYear}-${String(m+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
+    const monthTrips = trips.filter(t => t.start_date <= monthEnd && t.end_date >= monthStart);
+
+    html += `<div class="month-card">
+      <div class="month-name">
+        <span>${monthNames[m]}</span>
+        ${monthTrips.length ? `<span class="month-trips">${monthTrips.length} trip${monthTrips.length>1?'s':''}</span>` : ''}
+      </div>
+      <div class="month-grid">`;
+
+    for (let i = 0; i < 7; i++) html += `<div class="dow">${dowNames[i]}</div>`;
+    for (let i = 0; i < startDow; i++) html += `<div class="day-cell empty"></div>`;
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${currentYear}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const dayTrip = trips.find(t => t.start_date <= dateStr && t.end_date >= dateStr);
+      let classes = 'day-cell';
+      let style = '';
+      let onclick = '';
+      let title = '';
+      if (dateStr === todayStr) classes += ' today';
+      if (dayTrip) {
+        const color = colorForTrip(dayTrip);
+        classes += ' trip ' + dayTrip.status;
+        if (dayTrip.status === 'confirmed') {
+          style = `background:${color};`;
+        } else {
+          // tentative: muted fill + dashed outline in the trip color
+          style = `background:${color}1f;color:${color};border:1px dashed ${color}80;`;
+        }
+        onclick = `onclick="openTripModal('${dayTrip.id}')"`;
+        title = `title="${escapeHtml(dayTrip.destination)}"`;
+      }
+      html += `<div class="${classes}" style="${style}" ${onclick} ${title}>${d}</div>`;
+    }
+
+    html += `</div></div>`;
+  }
+  grid.innerHTML = html;
+}
+
+function renderTripsList() {
+  const list = document.getElementById('trips-list');
+  const titleEl = document.getElementById('trips-list-title');
+
+  const yearTrips = trips.filter(t => {
+    const sy = parseInt(t.start_date.slice(0, 4));
+    const ey = parseInt(t.end_date.slice(0, 4));
+    return sy <= currentYear && ey >= currentYear;
+  });
+
+  titleEl.innerHTML = `${currentYear} trips <span style="color:var(--dim);font-weight:400;letter-spacing:.04em">(${yearTrips.length})</span>`;
+
+  if (!yearTrips.length) {
+    list.innerHTML = `<div class="empty-state">no trips in ${currentYear}.<br>tap "+ add trip" to start planning.</div>`;
+    return;
+  }
+
+  let html = '';
+  for (const t of yearTrips) {
+    const color = colorForTrip(t);
+    const days = tripDurationDays(t.start_date, t.end_date);
+    const swatchStyle = t.status === 'confirmed'
+      ? `background:${color}`
+      : `background:transparent;border:1px dashed ${color}`;
+    html += `<div class="trip-row" onclick="openTripModal('${t.id}')">
+      <div class="swatch" style="${swatchStyle}"></div>
+      <div class="trip-info">
+        <div class="trip-dest">${escapeHtml(t.destination)}</div>
+        <div class="trip-meta">${formatDateRange(t.start_date, t.end_date)} · ${days} day${days>1?'s':''}</div>
+      </div>
+      <div class="trip-status ${t.status}">${t.status}</div>
+    </div>`;
+  }
+  list.innerHTML = html;
+}
+
+function setStatus(status) {
+  editingStatus = status;
+  document.getElementById('pill-tentative').className =
+    'status-pill' + (status === 'tentative' ? ' active-tentative' : '');
+  document.getElementById('pill-confirmed').className =
+    'status-pill' + (status === 'confirmed' ? ' active-confirmed' : '');
+}
+
+function openTripModal(tripId) {
+  editingTripId = tripId || null;
+  document.getElementById('modal-error').textContent = '';
+
+  if (tripId) {
+    const trip = trips.find(t => t.id === tripId);
+    if (!trip) return;
+    document.getElementById('modal-title-text').textContent = 'edit trip';
+    document.getElementById('trip-destination').value = trip.destination;
+    document.getElementById('trip-start').value = trip.start_date;
+    document.getElementById('trip-end').value = trip.end_date;
+    document.getElementById('trip-notes').value = trip.notes || '';
+    setStatus(trip.status);
+    document.getElementById('trip-delete-btn').classList.remove('hidden');
+  } else {
+    document.getElementById('modal-title-text').textContent = 'new trip';
+    document.getElementById('trip-destination').value = '';
+    // Default to today for both dates
+    const today = ymd(new Date());
+    document.getElementById('trip-start').value = today;
+    document.getElementById('trip-end').value = today;
+    document.getElementById('trip-notes').value = '';
+    setStatus('tentative');
+    document.getElementById('trip-delete-btn').classList.add('hidden');
+  }
+
+  document.getElementById('trip-modal').classList.add('open');
+  setTimeout(() => document.getElementById('trip-destination').focus(), 50);
+}
+
+function closeTripModal() {
+  document.getElementById('trip-modal').classList.remove('open');
+  editingTripId = null;
+}
+
+async function saveTrip() {
+  const dest = document.getElementById('trip-destination').value.trim();
+  const start = document.getElementById('trip-start').value;
+  const end = document.getElementById('trip-end').value;
+  const notes = document.getElementById('trip-notes').value.trim();
+  const errEl = document.getElementById('modal-error');
+  errEl.textContent = '';
+
+  if (!dest) { errEl.textContent = 'destination required'; return; }
+  if (!start || !end) { errEl.textContent = 'start and end dates required'; return; }
+  if (end < start) { errEl.textContent = 'end date must be on or after start date'; return; }
+
+  const payload = {
+    user_id: currentUser.id,
+    destination: dest,
+    notes,
+    start_date: start,
+    end_date: end,
+    status: editingStatus,
+  };
+
+  let res;
+  if (editingTripId) {
+    res = await window.sb.from('travel_trips').update(payload).eq('id', editingTripId);
+  } else {
+    res = await window.sb.from('travel_trips').insert(payload);
+  }
+  if (res.error) { errEl.textContent = res.error.message; return; }
+
+  closeTripModal();
+  toast(editingTripId ? 'trip updated' : 'trip added');
+
+  // Jump year view to the trip's year if it falls outside current view
+  const tripYear = parseInt(start.slice(0, 4));
+  if (tripYear !== currentYear) {
+    currentYear = tripYear;
+    document.getElementById('year-display').textContent = currentYear;
+  }
+  await loadTrips();
+}
+
+async function deleteTrip() {
+  if (!editingTripId) return;
+  if (!confirm('delete this trip?')) return;
+  const { error } = await window.sb.from('travel_trips').delete().eq('id', editingTripId);
+  if (error) { document.getElementById('modal-error').textContent = error.message; return; }
+  closeTripModal();
+  toast('trip deleted');
+  await loadTrips();
+}
+
+// Click overlay to close
+document.getElementById('trip-modal').addEventListener('click', e => {
+  if (e.target.id === 'trip-modal') closeTripModal();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeTripModal();
+});
+
+window.renderAuthGate(async (user) => {
+  document.getElementById('auth-gate').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('nav-email').textContent = user.email;
+  currentUser = user;
+  document.getElementById('year-display').textContent = currentYear;
+  await loadTrips();
+});
+</script>
+</body>
+</html>
