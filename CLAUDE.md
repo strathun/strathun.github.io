@@ -130,6 +130,7 @@ Unique constraint on `(user_id, game)`. Upserted on conflict.
 | start_date | date | inclusive |
 | end_date | date | inclusive |
 | status | text | `tentative` or `confirmed` (check constraint) |
+| excluded_dates | jsonb | default `'[]'`; array of `'YYYY-MM-DD'` weekday strings excluded from PTO |
 | created_at | timestamptz | auto |
 
 RLS is enabled — users can only read/write their own rows.
@@ -207,6 +208,11 @@ No build step, no CI needed.
 - Trips added via "Add Trip" modal with date pickers — no drag-to-select
 - Clicking an existing trip opens edit/delete modal
 - Mobile-first layout, 3×4 or 4×3 month grid
+- PTO counter: counts weekdays (M-F) within trip ranges; weekends excluded, holidays counted (no holiday list)
+- Two totals scoped to the viewed year: "committed" (confirmed) and "potential" (tentative), shown as a badge near year nav
+- Per-day PTO toggle: edit modal lists each weekday in the trip with a checkbox (default checked = counts); unchecking excludes that day. Excluded dates stored in travel_trips.excluded_dates (jsonb array of 'YYYY-MM-DD')
+- Counted PTO days show a small dot under the date number on the grid; excluded weekdays and weekends show no dot
+- Counts use unique weekday dates to avoid double-counting overlaps; recompute on any trip change, day toggle, or year switch
 
 ---
 

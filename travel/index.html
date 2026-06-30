@@ -258,6 +258,55 @@
   .toast.show { opacity: 1; }
 
   .loading-msg { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 12px; }
+
+  /* ── PTO badge ── */
+  .pto-badge {
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; flex-wrap: wrap;
+    font-size: 12px; margin: -10px auto 22px; max-width: 360px;
+    padding: 8px 14px; background: var(--bg1);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--muted);
+  }
+  .pto-badge .pto-label {
+    text-transform: uppercase; letter-spacing: .1em; font-size: 10px;
+    color: var(--muted); font-weight: 600;
+  }
+  .pto-badge .pto-sep { color: var(--dim); }
+  .pto-stat { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pto-stat.committed { color: var(--accent2); }
+  .pto-stat.potential { color: var(--warn); }
+
+  /* ── PTO calendar dot ── */
+  .pto-dot {
+    position: absolute; bottom: 1.5px; left: 50%;
+    width: 3px; height: 3px; border-radius: 50%;
+    background: currentColor; transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  /* ── PTO per-day toggles (modal) ── */
+  .pto-field-hint {
+    text-transform: none; letter-spacing: 0; color: var(--dim);
+    font-size: 9px; margin-left: 8px; font-weight: 400;
+  }
+  .pto-days {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px;
+    max-height: 168px; overflow-y: auto;
+  }
+  .pto-day {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 7px 9px;
+    font-size: 11px; cursor: pointer; color: var(--text);
+    user-select: none; transition: border-color .15s, opacity .15s, color .15s;
+  }
+  .pto-day:hover { border-color: var(--border2); }
+  .pto-day.off { opacity: .55; color: var(--muted); }
+  .pto-day input[type="checkbox"] {
+    width: auto; margin: 0; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;
+  }
+  .pto-days-empty { font-size: 11px; color: var(--muted); padding: 4px 0; }
 </style>
 </head>
 <body>
@@ -289,6 +338,8 @@
     <div class="year-display" id="year-display">—</div>
     <button onclick="changeYear(1)" aria-label="next year">▶</button>
   </div>
+
+  <div class="pto-badge" id="pto-badge"></div>
 
   <div id="year-grid" class="year-grid"></div>
 
@@ -326,6 +377,10 @@
         <div class="status-pill" id="pill-confirmed" onclick="setStatus('confirmed')">confirmed</div>
       </div>
     </div>
+    <div class="field" id="pto-field">
+      <label>pto days <span class="pto-field-hint">uncheck days you're not taking off</span></label>
+      <div class="pto-days" id="pto-days"></div>
+    </div>
     <div class="field">
       <label>notes</label>
       <textarea id="trip-notes" rows="3" placeholder="flights, hotels, things to do..."></textarea>
@@ -347,6 +402,8 @@ let currentYear = new Date().getFullYear();
 let trips = [];
 let editingTripId = null;
 let editingStatus = 'tentative';
+let editingExcluded = new Set();   // 'YYYY-MM-DD' weekdays excluded from PTO in the modal
+let ptoData = { committed: 0, potential: 0, ptoSet: new Set() };
 
 // Distinguishable colors that read well against the dark bg.
 // Color per trip is stable — derived from the trip id hash.
@@ -405,9 +462,55 @@ function tripDurationDays(start, end) {
   return Math.round((e - s) / 86400000) + 1;
 }
 
+// Inclusive list of 'YYYY-MM-DD' strings between start and end.
+function eachDate(start, end) {
+  const out = [];
+  const d = new Date(start + 'T00:00:00');
+  const e = new Date(end + 'T00:00:00');
+  while (d <= e) { out.push(ymd(d)); d.setDate(d.getDate() + 1); }
+  return out;
+}
+
+// Monday–Friday only; weekends never count toward PTO.
+function isWeekday(dateStr) {
+  const dow = new Date(dateStr + 'T00:00:00').getDay();
+  return dow >= 1 && dow <= 5;
+}
+
+// Recompute committed/potential PTO for the viewed year using unique weekday
+// dates (so overlapping trips don't double-count), minus per-trip exclusions.
+function recomputePto() {
+  const committedSet = new Set();
+  const potentialSet = new Set();
+  for (const t of trips) {
+    const excluded = new Set(t.excluded_dates || []);
+    for (const ds of eachDate(t.start_date, t.end_date)) {
+      if (parseInt(ds.slice(0, 4)) !== currentYear) continue;
+      if (!isWeekday(ds)) continue;
+      if (excluded.has(ds)) continue;
+      (t.status === 'confirmed' ? committedSet : potentialSet).add(ds);
+    }
+  }
+  ptoData = {
+    committed: committedSet.size,
+    potential: potentialSet.size,
+    ptoSet: new Set([...committedSet, ...potentialSet]),
+  };
+  renderPtoBadge();
+}
+
+function renderPtoBadge() {
+  document.getElementById('pto-badge').innerHTML =
+    `<span class="pto-label">PTO ${currentYear}</span>` +
+    `<span class="pto-stat committed">${ptoData.committed} committed</span>` +
+    `<span class="pto-sep">·</span>` +
+    `<span class="pto-stat potential">+${ptoData.potential} potential</span>`;
+}
+
 function changeYear(delta) {
   currentYear += delta;
   document.getElementById('year-display').textContent = currentYear;
+  recomputePto();
   renderYear();
   renderTripsList();
 }
@@ -422,6 +525,7 @@ async function loadTrips() {
   trips = data || [];
   const c = document.getElementById('trip-count');
   c.textContent = trips.length ? `(${trips.length})` : '';
+  recomputePto();
   renderYear();
   renderTripsList();
 }
@@ -471,7 +575,8 @@ function renderYear() {
         onclick = `onclick="openTripModal('${dayTrip.id}')"`;
         title = `title="${escapeHtml(dayTrip.destination)}"`;
       }
-      html += `<div class="${classes}" style="${style}" ${onclick} ${title}>${d}</div>`;
+      const dot = ptoData.ptoSet.has(dateStr) ? '<span class="pto-dot"></span>' : '';
+      html += `<div class="${classes}" style="${style}" ${onclick} ${title}>${d}${dot}</div>`;
     }
 
     html += `</div></div>`;
@@ -523,6 +628,53 @@ function setStatus(status) {
     'status-pill' + (status === 'confirmed' ? ' active-confirmed' : '');
 }
 
+// Weekdays in the modal's current date range (skips weekends entirely).
+function modalWeekdays() {
+  const start = document.getElementById('trip-start').value;
+  const end = document.getElementById('trip-end').value;
+  if (!start || !end || end < start) return [];
+  return eachDate(start, end).filter(isWeekday);
+}
+
+function renderDayToggles() {
+  const wrap = document.getElementById('pto-days');
+  const days = modalWeekdays();
+  if (!days.length) {
+    wrap.innerHTML = '<div class="pto-days-empty">no weekdays in this range</div>';
+    return;
+  }
+  let html = '';
+  for (const ds of days) {
+    const d = new Date(ds + 'T00:00:00');
+    const label = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    const checked = !editingExcluded.has(ds);
+    html += `<label class="pto-day${checked ? '' : ' off'}">
+      <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleDay('${ds}')">
+      <span>${label}</span>
+    </label>`;
+  }
+  wrap.innerHTML = html;
+}
+
+// Toggle a weekday's PTO status. Persists immediately when editing an existing
+// trip so the totals + dots update live; for a new trip it's held until save.
+async function toggleDay(ds) {
+  if (editingExcluded.has(ds)) editingExcluded.delete(ds);
+  else editingExcluded.add(ds);
+  renderDayToggles();
+
+  if (editingTripId) {
+    const arr = Array.from(editingExcluded);
+    const { error } = await window.sb
+      .from('travel_trips').update({ excluded_dates: arr }).eq('id', editingTripId);
+    if (error) { toast('failed to update day'); console.error(error); return; }
+    const t = trips.find(x => x.id === editingTripId);
+    if (t) t.excluded_dates = arr;
+    recomputePto();
+    renderYear();
+  }
+}
+
 function openTripModal(tripId) {
   editingTripId = tripId || null;
   document.getElementById('modal-error').textContent = '';
@@ -536,6 +688,7 @@ function openTripModal(tripId) {
     document.getElementById('trip-end').value = trip.end_date;
     document.getElementById('trip-notes').value = trip.notes || '';
     setStatus(trip.status);
+    editingExcluded = new Set(trip.excluded_dates || []);
     document.getElementById('trip-delete-btn').classList.remove('hidden');
   } else {
     document.getElementById('modal-title-text').textContent = 'new trip';
@@ -546,9 +699,11 @@ function openTripModal(tripId) {
     document.getElementById('trip-end').value = today;
     document.getElementById('trip-notes').value = '';
     setStatus('tentative');
+    editingExcluded = new Set();
     document.getElementById('trip-delete-btn').classList.add('hidden');
   }
 
+  renderDayToggles();
   document.getElementById('trip-modal').classList.add('open');
   setTimeout(() => document.getElementById('trip-destination').focus(), 50);
 }
@@ -570,6 +725,10 @@ async function saveTrip() {
   if (!start || !end) { errEl.textContent = 'start and end dates required'; return; }
   if (end < start) { errEl.textContent = 'end date must be on or after start date'; return; }
 
+  // Only keep exclusions that are weekdays inside the final saved range.
+  const rangeWeekdays = new Set(eachDate(start, end).filter(isWeekday));
+  const excluded_dates = Array.from(editingExcluded).filter(d => rangeWeekdays.has(d));
+
   const payload = {
     user_id: currentUser.id,
     destination: dest,
@@ -577,6 +736,7 @@ async function saveTrip() {
     start_date: start,
     end_date: end,
     status: editingStatus,
+    excluded_dates,
   };
 
   let res;
@@ -608,6 +768,10 @@ async function deleteTrip() {
   toast('trip deleted');
   await loadTrips();
 }
+
+// Re-render the per-day PTO toggles when the trip's date range changes.
+document.getElementById('trip-start').addEventListener('change', renderDayToggles);
+document.getElementById('trip-end').addEventListener('change', renderDayToggles);
 
 // Click overlay to close
 document.getElementById('trip-modal').addEventListener('click', e => {
