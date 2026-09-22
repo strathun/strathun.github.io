@@ -403,6 +403,7 @@ let trips = [];
 let editingTripId = null;
 let editingStatus = 'tentative';
 let editingExcluded = new Set();   // 'YYYY-MM-DD' weekdays excluded from PTO in the modal
+let endDateTouched = false;        // true once the end date was deliberately set
 let ptoData = { committed: 0, potential: 0, ptoSet: new Set() };
 
 // Distinguishable colors that read well against the dark bg.
@@ -441,6 +442,13 @@ function ymd(d) {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+// 'YYYY-MM-DD' shifted by n days.
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return ymd(d);
 }
 
 function formatDateRange(start, end) {
@@ -693,16 +701,19 @@ function openTripModal(tripId) {
   } else {
     document.getElementById('modal-title-text').textContent = 'new trip';
     document.getElementById('trip-destination').value = '';
-    // Default to today for both dates
+    // Default start to today, end to the day after
     const today = ymd(new Date());
     document.getElementById('trip-start').value = today;
-    document.getElementById('trip-end').value = today;
+    document.getElementById('trip-end').value = addDays(today, 1);
     document.getElementById('trip-notes').value = '';
     setStatus('tentative');
     editingExcluded = new Set();
     document.getElementById('trip-delete-btn').classList.add('hidden');
   }
 
+  // Saved trips' end dates count as deliberately set; new trips follow start.
+  endDateTouched = !!tripId;
+  document.getElementById('trip-end').min = document.getElementById('trip-start').value;
   renderDayToggles();
   document.getElementById('trip-modal').classList.add('open');
   setTimeout(() => document.getElementById('trip-destination').focus(), 50);
@@ -769,9 +780,31 @@ async function deleteTrip() {
   await loadTrips();
 }
 
+// Keep the end date in step with the start: min = start, and default to
+// start + 1 unless the user picked an end date themselves. An end date that
+// falls before a newly chosen start (or a cleared start) resets the default.
+function onStartDateChange() {
+  const start = document.getElementById('trip-start').value;
+  const endEl = document.getElementById('trip-end');
+  endEl.min = start;
+  if (!start) {
+    endEl.value = '';
+    endDateTouched = false;
+  } else if (!endDateTouched || !endEl.value || endEl.value < start) {
+    endEl.value = addDays(start, 1);
+    endDateTouched = false;
+  }
+  renderDayToggles();
+}
+
+function onEndDateChange() {
+  endDateTouched = !!document.getElementById('trip-end').value;
+  renderDayToggles();
+}
+
 // Re-render the per-day PTO toggles when the trip's date range changes.
-document.getElementById('trip-start').addEventListener('change', renderDayToggles);
-document.getElementById('trip-end').addEventListener('change', renderDayToggles);
+document.getElementById('trip-start').addEventListener('change', onStartDateChange);
+document.getElementById('trip-end').addEventListener('change', onEndDateChange);
 
 // Click overlay to close
 document.getElementById('trip-modal').addEventListener('click', e => {
