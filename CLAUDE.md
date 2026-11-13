@@ -30,8 +30,30 @@ strathun.github.io/
 │   └── index.html       # Game time tracker
 ├── [future-app]/
 │   └── index.html       # Each new app gets its own folder
+├── runs/                # Public share pages (see "Public pages" below)
+│   ├── dead-horse/      # Dead Horse 50K training map: index.html + routes.json
+│   └── tools/
+│       └── parse_gpx.py # Garmin GPX folder → routes.json
 └── CLAUDE.md            # This file
 ```
+
+---
+
+## Public pages
+
+Some pages exist to be shared by link with people who don't have an account (e.g. a run map for a friend).
+These are **not apps**: they live under a topic folder like `runs/`, have **no auth gate and no site nav**,
+and are not listed in the hub's `.app-grid`. Everything else still applies: `/assets/style.css` variables
+for page chrome, JetBrains Mono, vanilla JS, errors surfaced inline.
+
+- Data-visualization colors (e.g. a route color ramp) may be hardcoded in JS — they encode data, not chrome.
+- Map tiles must be **keyless** or use a key restricted to `strathun.github.io`. CARTO basemaps now watermark
+  keyless requests ("API KEY REQUIRED"), so they're not used. Current pages use Esri (dark, satellite) and
+  USGS (topo) tiles, with automatic fallback if a provider fails.
+- Leaflet loads from jsdelivr with SRI `integrity` hashes.
+- To add a run map: export GPX from Garmin Connect into a folder, run
+  `python3 runs/tools/parse_gpx.py <folder> runs/<name>/routes.json`, copy `runs/dead-horse/index.html`
+  and update its title/kicker text.
 
 ---
 
