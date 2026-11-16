@@ -30,6 +30,11 @@ strathun.github.io/
 │   └── index.html       # Game time tracker
 ├── [future-app]/
 │   └── index.html       # Each new app gets its own folder
+├── subs/                # Subscription tracker (in progress)
+│   ├── SPEC.md          # Behavior spec: source of truth for logic and acceptance criteria
+│   ├── schema.sql       # Tables + RLS (rls-test.sql verifies it)
+│   ├── package.json     # Marks subs/ as ES modules for node --test; not a build
+│   └── logic/           # Pure logic (SPEC §7) + *.test.js, no DOM or Supabase
 ├── runs/                # Public share pages (see "Public pages" below)
 │   ├── dead-horse/      # Dead Horse 50K training map: index.html + routes.json
 │   └── tools/
@@ -204,8 +209,16 @@ npx serve .
 Supabase works on localhost — you're hitting the real database.
 `http://localhost:8080` should be added to Supabase → Authentication → URL Configuration → Redirect URLs.
 
+**Tests:** apps with a `logic/` folder have unit tests (Node 22+, no install):
+
+```bash
+cd subs && node --test
+```
+
+`.github/workflows/subs-tests.yml` runs them on any push or PR touching `subs/`, in two timezones.
+
 **Deploy:** just `git push origin master` — GitHub Pages auto-deploys within ~60 seconds.
-No build step, no CI needed.
+No build step. CI only runs tests; it doesn't deploy.
 
 ---
 
@@ -217,6 +230,10 @@ No build step, no CI needed.
 - **No external JS libraries** unless there's a strong reason. If needed, load from `cdn.jsdelivr.net` or `cdnjs.cloudflare.com`.
 - **Active session state** (e.g. a running timer) uses `localStorage` as a temporary store since it doesn't need to survive across devices. Persistent user data always goes to Supabase.
 - **Error handling:** always surface errors to the user via a toast or inline message — never silently swallow them.
+- **Testable logic:** when an app has real rules (dates, money, state), put them in `<app>/logic/` as ES modules
+  that take plain rows and `today` as arguments, with a `*.test.js` beside each. Pages load them with
+  `<script type="module">`. Logic never touches the DOM or Supabase and never calls `toISOString()`
+  (`subs/logic/guard.test.js` enforces this). Test helpers must not be named `test-*.js`, or `node --test` runs them.
 - **Git commits:** present tense, lowercase, descriptive (`add habit tracker`, `fix calendar day selection bug`)
 
 ---
