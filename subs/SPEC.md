@@ -1,8 +1,13 @@
 # Subscription Rotation Tracker — Spec
 
-Status: Draft v1.1 · Owner: Hunter · Route: `strathun.github.io/subs/`
+Status: Draft v1.2 · Owner: Hunter · Route: `strathun.github.io/subs/`
 
 **Changelog**
+- v1.2 (2026-11-16):
+  - Renamed `charges.interval` to `billing_interval` (`interval` is a Postgres type keyword).
+  - Child tables use composite foreign keys on `(id, user_id)`, so rows can't be attached to another user's service or period.
+  - Service names are unique per user (case-insensitive), so the starter list can't load twice.
+  - Schema lives in `subs/schema.sql`; RLS acceptance test in `subs/rls-test.sql`.
 - v1.1 (2026-11-16):
   - Added a `charges` ledger and spend metrics with annual amortization.
   - Added a year view (which services were active in which month).
@@ -63,6 +68,8 @@ I want to keep only the subscriptions I'm actively using. Streaming services sho
 
 All tables have `user_id uuid not null default auth.uid() references auth.users`, and RLS policies for select/insert/update/delete with `user_id = auth.uid()`.
 
+Tenant safety: an RLS policy only checks the row being written, so child tables (`periods`, `charges`, `watchlist_items`) reference their parent with a composite FK on `(service_id, user_id)` → `services(id, user_id)`. `charges` references `periods(id, service_id, user_id)` with `on delete set null (period_id)`. A charge's period must then belong to the same service and user. Source of truth: `subs/schema.sql`.
+
 ### `services`
 | column | type | notes |
 |---|---|---|
@@ -102,7 +109,7 @@ Constraint: at most one *uncancelled* period per service. Use a partial unique i
 | period_id | uuid fk → periods, on delete set null | |
 | charged_on | date not null | |
 | amount_cents | int null | null = unknown, flagged and excluded from totals |
-| interval | text not null | snapshot of the billing interval this charge paid for |
+| billing_interval | text not null | snapshot of the billing interval this charge paid for |
 | source | text not null default `manual` | `manual` or `auto` (§7.3) |
 
 Unique index on `(period_id, charged_on)`. This makes automatic renewal recording idempotent, even with the app open in two tabs.
