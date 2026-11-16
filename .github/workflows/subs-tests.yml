@@ -1,0 +1,26 @@
+name: subs logic tests
+
+# Runs the pure-logic unit tests for the subscription tracker (subs/SPEC.md §7).
+# Two timezones on either side of UTC catch any code that slips into UTC dates.
+on:
+  push:
+    paths: ['subs/**', '.github/workflows/subs-tests.yml']
+  pull_request:
+    paths: ['subs/**', '.github/workflows/subs-tests.yml']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tz: [America/Denver, Pacific/Auckland]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: node --test (TZ=${{ matrix.tz }})
+        working-directory: subs
+        env:
+          TZ: ${{ matrix.tz }}
+        run: node --test
