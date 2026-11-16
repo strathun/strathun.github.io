@@ -1,8 +1,14 @@
 # Subscription Rotation Tracker — Spec
 
-Status: Draft v1.2 · Owner: Hunter · Route: `strathun.github.io/subs/`
+Status: Draft v1.3 · Owner: Hunter · Route: `strathun.github.io/subs/`
 
 **Changelog**
+- v1.3 (2026-11-16): settled the §7 edge cases before writing the logic tests.
+  - Renewals land on the start day, clamped to month end, so month-end starts don't drift (§7.3).
+  - Projection adds run rate month by month, only where nothing is already committed (§7.5).
+  - Defined month M for past and future years (§7).
+  - Decide-by stays up after its date until the renewal is recorded. Check price also covers prices that were never checked (§7.2).
+  - Blank access end, archived services, and next-up tie-breaks (§7.1, §7.2, §7.5, §7.7).
 - v1.2 (2026-11-16):
   - Renamed `charges.interval` to `billing_interval` (`interval` is a Postgres type keyword).
   - Child tables use composite foreign keys on `(id, user_id)`, so rows can't be attached to another user's service or period.
@@ -126,21 +132,27 @@ Unique index on `(period_id, charged_on)`. This makes automatic renewal recordin
 
 ## 7. Logic (pure functions, unit-tested)
 
-Put all of this in modules with no DOM or Supabase calls (e.g. `logic/status.js`, `logic/spend.js`), tested with `node --test`. The UI only renders what these return.
+All of this lives in `subs/logic/`, one module per subsection (`dates.js`, `status.js`, `alerts.js`, `periods.js`, `amortize.js`, `spend.js`, `yearview.js`, `nextup.js`). The modules make no DOM or Supabase calls, take `today` as an argument, and read rows exactly as Supabase returns them. Run the tests with `cd subs && node --test`. The UI only renders what these return.
 
 **Dates** are local calendar dates (`YYYY-MM-DD` from local date parts, never `toISOString()`). Month math clamps to month end (Jan 31 + 1 month = Feb 28/29). Money is integer cents. Round only for display.
 
+**Month M** for a selected year Y is today's month when Y is the current year, 12 for a past year, and 0 for a future year.
+
 ### 7.1 Status (per service, from its latest period, given `today`)
+The latest period is the one with the latest `started_on`.
 - `renewing`: latest period has `cancelled_on` null.
-- `ending`: `cancelled_on` set and `access_ends_on >= today`. Show "Active until {date}".
-- `inactive`: no periods, or `access_ends_on < today`.
+- `ending`: `cancelled_on` set and access end `>= today`. Show "Active until {date}".
+- `inactive`: no periods, or access end `< today`.
+
+Access end is `access_ends_on`, or `renews_on - 1 day` if it was left blank.
 
 ### 7.2 Alerts
+Archived services show no alerts.
 - **Cancel now**: `role = rotator` and status `renewing`.
-- **Decide by {date}**: `role = keeper`, status `renewing`, and `renews_on - cancel_lead_days` is within 14 days.
+- **Decide by {date}**: `role = keeper`, status `renewing`, and the decide-by date (`renews_on - cancel_lead_days`) is 14 days away or less. It stays up after that date passes, until the renewal is recorded.
 - **Verify link**: `url_verified = false`.
 - **Price unknown**: `price_cents` is null.
-- **Check price**: `price_checked_on` is more than 180 days old.
+- **Check price**: `price_cents` is set and `price_checked_on` is blank or more than 180 days old.
 - **Amount unknown**: any charge with null `amount_cents`.
 
 ### 7.3 Subscribing, cancelling, automatic renewals
@@ -153,7 +165,8 @@ Put all of this in modules with no DOM or Supabase calls (e.g. `logic/status.js`
   2. advance `renews_on` one interval;
   3. repeat until `renews_on > today`.
 
-  A forgotten rotator also gets charged here. That's the truth, and its Cancel-now alert stays up.
+  A forgotten rotator also gets charged here. That's the truth, and its Cancel-now alert stays up. Archived services are caught up too: an open period still bills.
+- **Renewal day**: monthly, quarterly and annual renewals land on the day of `started_on`, clamped to month end. A Jan 31 start renews Feb 28, Mar 31, Apr 30 (not Feb 28, Mar 28, Apr 28). If `renews_on` was edited to a different day, that day becomes the renewal day. Weekly renewals add 7 days.
 
 ### 7.4 Amortization
 Each charge is spread over **coverage months**, starting with the month of `charged_on`:
@@ -171,7 +184,11 @@ The amount is split evenly across those months in cents. Remainder cents go to t
 - **This year so far (amortized)**: sum of slices in Y, Jan through M.
 - **Average monthly (this year)**: this year so far ÷ M (the current month counts, so January divides by 1).
 - **Cash paid this year**: sum of `amount_cents` for charges with `charged_on` in Y. Shown as secondary text.
-- **Projected full year**: this year so far + slices already committed for months after M (annual/quarterly charges already paid) + (12 − M) × run rate of services that are `renewing` and have no committed slice in those months. Label it "if nothing changes".
+- **Projected full year**: this year so far + slices already committed for months after M (annual/quarterly charges already paid) + run rate for the rest. For each month after M, add the run rate of every `renewing` service with no committed slice in that month. Label it "if nothing changes".
+  - Run rate is the monthly equivalent of `price_cents`: weekly × 52/12, monthly × 1, quarterly ÷ 3, annual ÷ 12. An unknown price counts as 0 (it already has a Price unknown alert).
+  - This equals (12 − M) × run rate when nothing is prepaid. It differs when prepaid coverage ends mid-year.
+- For a future year (M = 0), so far and average are blank.
+- Archived services count everywhere in this section.
 
 Worked example: a $100 annual charge on Jan 1, 2026:
 - January: this month $8.33, average $8.33, so far $8.33, cash $100.
@@ -179,15 +196,19 @@ Worked example: a $100 annual charge on Jan 1, 2026:
 
 A $120 annual charge on Aug 10, 2025 contributes $10 to each of Jan–Jul 2026. If it's still renewing, catch-up records the Aug 10, 2026 renewal, which covers Aug 2026–Jul 2027.
 
+Projection examples (derived from the rules above):
+- January 2026, the $100 service still renewing: $100.00 ($8.33 so far + $91.67 committed for Feb–Dec).
+- June 2026, the $120 service still renewing: $120.00 ($60 so far + $10 committed for July + 5 × $10 run rate for Aug–Dec).
+
 ### 7.6 Year view
 For year Y, there is one row per service that was active or had a slice in Y (including archived ones), and one column per month.
-- A cell is **active** if any period's access window overlaps that month. The window runs from `started_on` to `access_ends_on`, or to today if still renewing.
+- A cell is **active** if any period's access window overlaps that month. The window runs from `started_on` to the access end (§7.1), or to today if still renewing.
 - A cell shows the service's slice amount for that month, if any.
-- Months after the current month show committed slices only, muted.
+- Months after M are never active. They show committed slices only, muted.
 - A totals row equals "This month" for each month.
 
 ### 7.7 Next up
-Among inactive rotators, pick the one with the most open watchlist items. Ties go to the earliest `available_from`.
+Among inactive, non-archived rotators with at least one open watchlist item, pick the one with the most open items. Ties go to the earliest `available_from` among each service's open items. A blank `available_from` means available now and comes first. Remaining ties go by name.
 
 ## 8. Screens
 
