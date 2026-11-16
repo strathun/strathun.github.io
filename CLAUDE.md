@@ -157,7 +157,16 @@ Unique constraint on `(user_id, game)`. Upserted on conflict.
 
 RLS is enabled — users can only read/write their own rows.
 
-**When adding tables for new apps:** always enable RLS and add the four standard policies (select/insert/update/delete scoped to `auth.uid() = user_id`). Write the SQL in a comment block at the top of the app's `index.html` for reference.
+### Subscription tracker (`subs/`)
+Tables `services`, `periods`, `charges`, `watchlist_items`. Full definitions in `subs/schema.sql`
+(source of truth) and `subs/SPEC.md` §6. Verify RLS with `subs/rls-test.sql` (runs in a rolled-back
+transaction; last row must read `ALL RLS CHECKS PASSED`).
+- `user_id` defaults to `auth.uid()`, so clients never send it.
+- Child tables use composite FKs on `(service_id, user_id)` so a user can't attach rows to another user's service.
+- `schema.sql` uses `create ... if not exists`, so re-running it won't alter an existing table. Later schema
+  changes go in a new `alter table` migration (e.g. `subs/migrations/002-*.sql`).
+
+**When adding tables for new apps:** always enable RLS and add the four standard policies (select/insert/update/delete scoped to `auth.uid() = user_id`). Write the SQL in a comment block at the top of the app's `index.html`, or for larger schemas in `<app>/schema.sql`. Use `(select auth.uid())` in policies, add `to authenticated`, and give updates a `with check`.
 
 ---
 
@@ -219,6 +228,7 @@ No build step, no CI needed.
 | Game Tracker | `/games/` | `game_sessions` |
 | Game Library | `/games/library/` | `games`, `game_todos` |
 | Travel Planner | `/travel/` | `travel_trips` |
+| Subscriptions (in progress) | `/subs/` | `services`, `periods`, `charges`, `watchlist_items` |
 
 ---
 
