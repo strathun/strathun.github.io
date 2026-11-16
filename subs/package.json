@@ -1,0 +1,9 @@
+{
+  "name": "subs",
+  "private": true,
+  "description": "Not a build. Marks subs/ JS files as ES modules so node --test runs logic/ as-is.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
