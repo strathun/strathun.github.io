@@ -405,15 +405,14 @@ function renderDetail(id) {
       <button class="btn" data-action="restore" data-id="${esc(service.id)}">restore</button>
       <button class="btn btn-danger" data-action="delete" data-id="${esc(service.id)}">delete permanently…</button>`;
   } else {
-    // At most one uncancelled period (SPEC §6): while it exists, Mark subscribed is off (acceptance 7).
+    // At most one uncancelled period (SPEC §6): while it exists, Mark subscribed is off (acceptance 7),
+    // and the service is renewing (§7.1), so Archive is off too.
     const open = openPeriod(periodsOf(service.id));
     const allowed = canArchive(status.status);
     const id = esc(service.id);
-    const hint = !open
-      ? ''
-      : allowed
-        ? 'a period is still renewing. mark it cancelled before subscribing again.'
-        : "still renewing. mark it cancelled before subscribing again or archiving, so its charges can't continue unseen.";
+    const hint = open
+      ? "still renewing. mark it cancelled before subscribing again or archiving, so its charges can't continue unseen."
+      : '';
     const off = 'disabled aria-describedby="actions-hint"';
     actions = `
       ${open ? `<button class="btn btn-primary" data-action="cancel" data-id="${id}">mark cancelled</button>` : ''}

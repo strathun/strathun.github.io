@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { alertsFor } from './alerts.js';
 import { addDays } from './dates.js';
-import { svc, period, charge, TODAY } from './fixtures.js';
+import { svc, period, charge, openBehindCancelled, TODAY } from './fixtures.js';
 
 const types = (alerts) => alerts.map((a) => a.type);
 const renewing = (renews_on) => period({ started_on: '2026-11-01', renews_on });
@@ -81,4 +81,10 @@ test('alerts come back in a stable order', () => {
   const service = svc({ role: 'rotator', url_verified: false, price_cents: null });
   const alerts = alertsFor({ service, periods: [renewing('2026-12-01')], charges: [charge({ amount_cents: null })], today: TODAY });
   assert.deepEqual(types(alerts), ['cancel_now', 'verify_link', 'price_unknown', 'amount_unknown']);
+});
+
+test('acceptance 19: Cancel now and Decide by follow an older uncancelled period', () => {
+  const periods = openBehindCancelled();
+  assert.deepEqual(types(alertsFor({ service: svc({ role: 'rotator' }), periods, today: TODAY })), ['cancel_now']);
+  assert.deepEqual(types(alertsFor({ service: svc({ role: 'keeper' }), periods, today: TODAY })), ['decide_by']);
 });

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { serviceStatus, latestPeriod, accessEnd, groupByService, openPeriod } from './status.js';
-import { period, TODAY } from './fixtures.js';
+import { period, openBehindCancelled, TODAY } from './fixtures.js';
 
 test('no periods → inactive', () => {
   assert.deepEqual(serviceStatus([], TODAY), { status: 'inactive', period: null, accessEndsOn: null });
@@ -74,4 +74,13 @@ test('openPeriod finds the uncancelled period, even when it is not the latest', 
   assert.equal(openPeriod([later, open]), open);
   assert.equal(openPeriod([later]), null);
   assert.equal(openPeriod([]), null);
+});
+
+test('acceptance 19: an older uncancelled period is renewing, even behind a later cancelled one', () => {
+  const [open, later] = openBehindCancelled();
+  assert.deepEqual(serviceStatus([open, later], TODAY), { status: 'renewing', period: open, accessEndsOn: null });
+  assert.deepEqual(serviceStatus([later, open], TODAY), { status: 'renewing', period: open, accessEndsOn: null });
+  // Also when the later one is still ending: the open period is what bills.
+  const ending = period({ started_on: '2026-11-01', renews_on: '2026-12-01', cancelled_on: '2026-11-01', access_ends_on: '2026-11-30' });
+  assert.equal(serviceStatus([open, ending], TODAY).status, 'renewing');
 });

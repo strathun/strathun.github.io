@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { nextUp } from './nextup.js';
-import { svc, period, item, TODAY } from './fixtures.js';
+import { svc, period, item, openBehindCancelled, TODAY } from './fixtures.js';
 
 const pick = (input) => nextUp({ periods: [], watchlist: [], today: TODAY, ...input })?.service.id ?? null;
 
@@ -70,4 +70,9 @@ test('remaining ties go by name', () => {
   const services = [svc({ id: 'z', name: 'Zeta' }), svc({ id: 'a', name: 'alpha' })];
   const watchlist = [item({ service_id: 'z' }), item({ service_id: 'a' })];
   assert.equal(pick({ services, watchlist }), 'a');
+});
+
+test('a rotator with an older uncancelled period is still billing, so it is not next up', () => {
+  const services = [svc({ id: 'a', name: 'A' })];
+  assert.equal(pick({ services, watchlist: [item({ service_id: 'a' })], periods: openBehindCancelled('a') }), null);
 });

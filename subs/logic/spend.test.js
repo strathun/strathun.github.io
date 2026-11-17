@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spendMetrics, runRateCents } from './spend.js';
-import { svc, period, charge } from './fixtures.js';
+import { svc, period, charge, openBehindCancelled } from './fixtures.js';
 
 // §7.5 worked example 1: a $100 annual charge on Jan 1, 2026, still renewing.
 const hundred = svc({ id: 'h', role: 'keeper', billing_interval: 'annual', price_cents: 10000 });
@@ -113,6 +113,17 @@ test('cancelled services add no run rate', () => {
   });
   assert.equal(m.runRate, 0);
   assert.equal(m.projected, m.soFar);
+});
+
+test('an older uncancelled period still adds run rate: catch-up bills it (SPEC §7.1)', () => {
+  const m = spendMetrics({
+    services: [svc({ id: 's', price_cents: 1500 })],
+    periods: openBehindCancelled('s'),
+    charges: [],
+    year: 2026,
+    today: '2026-11-16',
+  });
+  assert.equal(m.runRate, 1500); // December
 });
 
 test('archived services still count in spend and run rate', () => {

@@ -6,7 +6,7 @@ import {
   serviceBadges, canArchive, setupProgress, NEW_SERVICE, SERVICE_FIELDS,
 } from './services.js';
 import { groupByService } from './status.js';
-import { svc, period, TODAY } from './fixtures.js';
+import { svc, period, openBehindCancelled, TODAY } from './fixtures.js';
 
 // ── money ───────────────────────────────────────────────────────────────────
 
@@ -280,4 +280,10 @@ test('setupProgress counts priced services, ignoring archived ones', () => {
     ]),
     { priced: 2, total: 3 },
   );
+});
+
+test("acceptance 19: an older uncancelled period groups the service as renewing, so it can't be archived", () => {
+  const g = groupServices([svc({ id: 'n', name: 'Netflix' })], groupByService(openBehindCancelled('n')), TODAY);
+  assert.deepEqual(g.renewing.map((e) => e.service.id), ['n']);
+  assert.equal(canArchive(g.renewing[0].status), false);
 });

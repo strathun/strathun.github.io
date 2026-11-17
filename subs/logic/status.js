@@ -1,4 +1,4 @@
-// Service status (SPEC §7.1), from the service's latest period and `today`.
+// Service status (SPEC §7.1), from the service's periods and `today`.
 
 import { addDays } from './dates.js';
 
@@ -39,11 +39,17 @@ export function accessEnd(period) {
   return period.cancelled_on;
 }
 
-/** { status: 'renewing' | 'ending' | 'inactive', period, accessEndsOn } */
+/**
+ * { status: 'renewing' | 'ending' | 'inactive', period, accessEndsOn }
+ * An uncancelled period makes the service renewing even when a later period was
+ * cancelled (a backfill left open): catch-up still bills it. Otherwise the latest
+ * period decides.
+ */
 export function serviceStatus(periods, today) {
+  const open = openPeriod(periods);
+  if (open) return { status: 'renewing', period: open, accessEndsOn: null };
   const period = latestPeriod(periods);
   if (!period) return { status: 'inactive', period: null, accessEndsOn: null };
-  if (period.cancelled_on == null) return { status: 'renewing', period, accessEndsOn: null };
   const accessEndsOn = accessEnd(period);
   return { status: accessEndsOn >= today ? 'ending' : 'inactive', period, accessEndsOn };
 }
