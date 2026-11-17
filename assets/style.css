@@ -40,13 +40,18 @@ a:hover { opacity: 0.8; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  column-gap: 16px;
   padding: 0 24px;
-  height: 48px;
+  min-height: 48px;
   background: var(--bg1);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   z-index: 100;
+  /* Lets the rules below react to the nav's own width, not the screen's:
+     the games pages cap their body at 480px even on a desktop. */
+  container: site-nav / inline-size;
 }
 .site-nav .logo {
   font-size: 13px;
@@ -84,6 +89,25 @@ a:hover { opacity: 0.8; }
   transition: all .15s;
 }
 .site-nav .nav-user button:hover { border-color: var(--border2); color: var(--text); }
+
+/* Too narrow for one row: links get their own row (scrolling inside the nav if
+   they still don't fit), and a long email shortens with an ellipsis. */
+@container site-nav (max-width: 700px) {
+  .site-nav .logo,
+  .site-nav .nav-user { min-height: 44px; display: flex; align-items: center; }
+  .site-nav .logo { flex: none; }
+  .site-nav .nav-user { flex: 1; min-width: 0; justify-content: flex-end; }
+  .site-nav .nav-user span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .site-nav .nav-user button { flex: none; }
+  .site-nav .nav-links {
+    order: 3;
+    flex-basis: 100%;
+    gap: 16px;
+    overflow-x: auto;
+    padding-bottom: 10px;
+    white-space: nowrap;
+  }
+}
 
 /* ── auth gate ── */
 #auth-gate {
