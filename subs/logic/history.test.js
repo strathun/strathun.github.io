@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { periodHistory } from './history.js';
+import { periodHistory, chargeTotal } from './history.js';
 import { period, charge } from './fixtures.js';
 
 const ids = (rows) => rows.map((r) => r.id);
@@ -62,4 +62,10 @@ test('does not reorder the arrays it was given', () => {
   const input = [a, b];
   periodHistory(input, []);
   assert.deepEqual(ids(input), ['a', 'b']);
+});
+
+test('chargeTotal adds known amounts in cents and counts unknown ones', () => {
+  const charges = [charge({ amount_cents: 1199 }), charge({ amount_cents: null }), charge({ amount_cents: 1201 })];
+  assert.deepEqual(chargeTotal(charges), { cents: 2400, unknown: 1 });
+  assert.deepEqual(chargeTotal([]), { cents: 0, unknown: 0 });
 });

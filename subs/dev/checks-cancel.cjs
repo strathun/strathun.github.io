@@ -61,7 +61,7 @@ const SEED = {
   const upd = await fake(() => window.__fake.calls.filter((c) => c.table === 'periods' && c.op === 'update').pop());
   check('update only matches an uncancelled period', JSON.stringify(upd.filters) === JSON.stringify([['id', p1.id], ['cancelled_on', null]]), JSON.stringify(upd.filters));
   check('acceptance 8: toast and status say active until', (await text('#toast')) === 'cancelled Netflix · active until dec 15' && (await text('.detail-status')) === 'active until dec 15');
-  check('history shows the closed period', (await text('.history .period-head')) === 'nov 16 → dec 15 cancelled nov 16');
+  check('history shows the closed period', (await text('.history .period-head')) === 'nov 16 → dec 15 cancelled nov 16 delete…');
   check('mark subscribed available again, mark cancelled gone', (await page.isEnabled('[data-action="subscribe"]')) && (await page.$$('[data-action="cancel"]')).length === 0);
 
   // 2. keeper: no prompt after subscribing; mark cancelled from the detail with an edited access end

@@ -29,3 +29,14 @@ export function periodHistory(periods = [], charges = []) {
     }));
   return { periods: entries, loose: byDate(loose) };
 }
+
+/** Total of the known amounts, and how many are unknown: { cents, unknown }. */
+export function chargeTotal(charges) {
+  let cents = 0;
+  let unknown = 0;
+  for (const c of charges) {
+    if (c.amount_cents == null) unknown += 1;
+    else cents += c.amount_cents;
+  }
+  return { cents, unknown };
+}

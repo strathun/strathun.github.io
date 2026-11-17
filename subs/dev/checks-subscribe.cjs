@@ -54,7 +54,7 @@ const SEED = {
   check('rpc args', JSON.stringify(call.payload) === JSON.stringify({ p_service_id: 's1', p_started_on: '2026-11-16', p_renews_on: '2026-12-16', p_billing_interval: 'monthly', p_amount_cents: 1999, p_set_price: false }), JSON.stringify(call.payload));
   check('toast', (await page.textContent('#toast')) === 'marked Netflix subscribed');
   check('detail now renewing', (await page.textContent('.detail-status')).trim() === 'active · renews dec 16');
-  check('history shows the period and its charge', (await page.textContent('.history .period-head')).replace(/\s+/g, ' ').trim() === 'nov 16 → renewing next charge dec 16' && (await page.textContent('.history .charge')).replace(/\s+/g, ' ').trim() === 'nov 16 $19.99 / mo');
+  check('history shows the period and its charge', (await page.textContent('.history .period-head')).replace(/\s+/g, ' ').trim() === 'nov 16 → renewing next charge dec 16 delete…' && (await page.textContent('.history .charge')).replace(/\s+/g, ' ').trim() === 'nov 16 $19.99 / mo');
   check('price unchanged without the tick', (await page.textContent('.kv dd')).startsWith('$17.99 / mo'));
 
   // acceptance 7: disabled while a period is open

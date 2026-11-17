@@ -14,7 +14,7 @@ import {
   CATEGORIES, INTERVALS, INTERVAL_SHORT, formatCents, formatPrice, formValues, serviceFromForm,
   findNameConflict, groupServices, serviceBadges, canArchive, isWebUrl, setupProgress, parseCents,
 } from './logic/services.js';
-import { periodHistory } from './logic/history.js';
+import { periodHistory, chargeTotal } from './logic/history.js';
 import {
   setPriceOption, subscribeDefaults, subscribeFromForm,
   renewalPending, cancelDefaults, cancelFromForm,
@@ -451,17 +451,26 @@ function renderDetail(id) {
 
 // ── period history and charges (SPEC §8.3) ──────────────────────────────────
 
-function periodHeadHtml({ period, open, accessEndsOn }, today) {
+/** 'nov 1 → renewing' or 'mar 1 → mar 31', the way the history and dialogs name a period. */
+function periodLabel({ period, open, accessEndsOn }, today) {
+  const start = formatDay(period.started_on, today);
+  return open ? `${start} → renewing` : `${start} → ${formatDay(accessEndsOn, today)}`;
+}
+
+function periodHeadHtml(entry, today) {
+  const { period, open, accessEndsOn } = entry;
   const start = esc(formatDay(period.started_on, today));
+  const del = `<button class="link-btn period-delete" data-action="delete-period" data-id="${esc(period.id)}" data-service="${esc(period.service_id)}" aria-label="delete the ${esc(periodLabel(entry, today))} period">delete…</button>`;
   if (open) {
     const next = period.renews_on
       ? `<span class="period-meta">next charge ${esc(formatDay(period.renews_on, today))}</span>`
       : '';
-    return `<span class="period-dates">${start} → <span class="status-renewing">renewing</span></span> ${next}`;
+    return `<span class="period-when"><span class="period-dates">${start} → <span class="status-renewing">renewing</span></span> ${next}</span> ${del}`;
   }
-  return `
-    <span class="period-dates">${start} → ${esc(formatDay(accessEndsOn, today))}</span>
-    <span class="period-meta">cancelled ${esc(formatDay(period.cancelled_on, today))}</span>`;
+  return `<span class="period-when">
+      <span class="period-dates">${start} → ${esc(formatDay(accessEndsOn, today))}</span>
+      <span class="period-meta">cancelled ${esc(formatDay(period.cancelled_on, today))}</span>
+    </span> ${del}`;
 }
 
 function chargeHtml(charge, today) {
@@ -900,6 +909,58 @@ async function saveCancel(event) {
   });
 }
 
+// ── delete period (SPEC §8.3) ───────────────────────────────────────────────
+
+/** { service, entry } in the Delete period dialog; entry is a periodHistory() entry. */
+let deletingPeriod = null;
+
+function totalText(charges) {
+  const { cents, unknown } = chargeTotal(charges);
+  const known = formatCents(cents);
+  return unknown ? `${known} plus ${unknown} unknown` : known;
+}
+
+function openDeletePeriod(button) {
+  const service = findService(button.dataset.service);
+  const { periods } = periodHistory(periodsOf(button.dataset.service), chargesOf(button.dataset.service));
+  const entry = periods.find((e) => e.period.id === button.dataset.id);
+  if (!service || !entry) {
+    toast('that period is gone. reload the page.', { error: true });
+    return;
+  }
+  deletingPeriod = { service, entry };
+  const today = todayLocal();
+  const n = entry.charges.length;
+  $('#delp-title').textContent = `delete ${service.name} period`;
+  $('#delp-period').textContent = periodLabel(entry, today);
+  $('#delp-count').textContent = n ? `and its ${n} charge${n === 1 ? '' : 's'} (${totalText(entry.charges)})` : '(it has no charges)';
+  $('#delp-charges').innerHTML = entry.charges.map((c) => chargeHtml(c, today)).join('');
+  $('#delp-error').textContent = '';
+  openModal('delp-modal');
+  $('#delp-go').focus();
+}
+
+function closeDeletePeriod() {
+  if (closeModal('delp-modal')) deletingPeriod = null;
+}
+
+async function confirmDeletePeriod(event) {
+  event.preventDefault();
+  if (!deletingPeriod || dialogBusy) return;
+  const { service, entry } = deletingPeriod;
+  await submitDialog('delp-modal', $('#delp-go'), 'deleting…', async () => {
+    const { period, charge_ids: gone } = await db.deletePeriod(entry.period.id);
+    const removed = new Set(gone);
+    state.periodsByService.set(service.id, periodsOf(service.id).filter((p) => p.id !== period.id));
+    state.chargesByService.set(service.id, chargesOf(service.id).filter((c) => !removed.has(c.id) && c.period_id !== period.id));
+    return () => {
+      render();
+      const n = gone.length;
+      toast(n ? `deleted the period and its ${n} charge${n === 1 ? '' : 's'}` : 'deleted the period');
+    };
+  });
+}
+
 // ── events ──────────────────────────────────────────────────────────────────
 
 const ACTIONS = {
@@ -934,6 +995,8 @@ const ACTIONS = {
     else toast('that service is gone. reload the page.', { error: true });
   },
   'close-cancel': closeCancel,
+  'delete-period': openDeletePeriod,
+  'close-delp': closeDeletePeriod,
   delete: openDelete,
   reload: load,
 };
@@ -949,6 +1012,7 @@ subForm.addEventListener('submit', saveSubscribe);
 subForm.addEventListener('input', onSubscribeInput);
 subForm.addEventListener('change', onSubscribeInput);
 cancelForm.addEventListener('submit', saveCancel);
+$('#delp-form').addEventListener('submit', confirmDeletePeriod);
 $('#del-confirm').addEventListener('input', () => { $('#del-go').disabled = !deleteTyped(); });
 
 window.addEventListener('hashchange', () => {
@@ -963,6 +1027,7 @@ window.addEventListener('hashchange', () => {
 // text in a field and releasing outside the dialog doesn't throw the form away.
 const CLOSERS = {
   'svc-modal': closeForm, 'del-modal': closeDelete, 'sub-modal': closeSubscribe, 'cancel-modal': closeCancel,
+  'delp-modal': closeDeletePeriod,
 };
 for (const [id, close] of Object.entries(CLOSERS)) {
   const overlay = document.getElementById(id);

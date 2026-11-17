@@ -132,9 +132,13 @@
   .period { padding: 10px 0; border-top: 1px solid var(--border); }
   .period-list .period:first-child { border-top: none; }
   .period-list + .period { border-top: 1px dashed var(--border); }
-  .period-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; }
+  .period-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 13px; }
+  .period-when { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
   .period-dates { font-weight: 600; }
   .period-meta { font-size: 11px; color: var(--muted); }
+  .period-delete { margin: 0; padding: 0; font-size: 11px; flex-shrink: 0; }
+  .period-delete:hover { color: var(--danger); }
+  #delp-charges { margin: 0 0 14px; }
   .charge-list { list-style: none; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
   .charge {
     display: grid; grid-template-columns: 8.5em minmax(0, 1fr) auto; gap: 8px; align-items: center;
@@ -478,6 +482,29 @@
       <div class="modal-actions">
         <button class="btn" type="button" data-action="close-cancel">not now</button>
         <button class="btn btn-primary" type="submit" id="cancel-save">mark cancelled</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Delete period (SPEC §8.3): the period and its charges, in one transaction ── -->
+<div class="overlay" id="delp-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="delp-title">
+    <div class="modal-title">
+      <span id="delp-title">delete period</span>
+      <button class="close-btn" type="button" data-action="close-delp" aria-label="close">×</button>
+    </div>
+    <form id="delp-form" novalidate>
+      <p class="small muted del-warning">
+        this removes the <strong id="delp-period"></strong> period <span id="delp-count"></span>.
+        spend stops counting them. it can't be undone.
+      </p>
+      <ul class="charge-list" id="delp-charges"></ul>
+      <p class="small muted modal-lead">to fix a start date, delete the period, then mark subscribed again on the right date.</p>
+      <div class="modal-error" id="delp-error" role="alert"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-delp">keep it</button>
+        <button class="btn btn-danger" type="submit" id="delp-go">delete period</button>
       </div>
     </form>
   </div>

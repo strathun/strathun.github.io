@@ -49,7 +49,7 @@ const SEED = {
   await page.waitForSelector('.history');
   const spotify = await history();
   check('periods newest first, open one says renewing + next charge',
-    spotify[0].head === 'aug 20 → renewing next charge nov 20' && spotify[1].head === 'feb 3 → mar 2 cancelled feb 3', JSON.stringify(spotify.map((p) => p.head)));
+    spotify[0].head === 'aug 20 → renewing next charge nov 20 delete…' && spotify[1].head === 'feb 3 → mar 2 cancelled feb 3 delete…', JSON.stringify(spotify.map((p) => p.head)));
   check('charges newest first with interval, auto badge and unknown amount',
     JSON.stringify(spotify[0].charges) === JSON.stringify(['oct 20 amount unknown / mo auto', 'sep 20 $11.99 / mo auto', 'aug 20 $11.99 / mo']), JSON.stringify(spotify[0].charges));
   check('charges in no period listed last', spotify[2].head === 'charges in no period' && spotify[2].charges[0] === 'jan 15 $9.99 / mo');
@@ -62,7 +62,7 @@ const SEED = {
   await page.waitForFunction(() => document.querySelector('.detail-name')?.textContent === 'Nintendo');
   const nso = await history();
   check('past-year dates show the year, blank access end = renews_on − 1',
-    nso[0].head === 'aug 10, 2025 → aug 9 cancelled aug 10, 2025' && nso[0].charges[0] === 'aug 10, 2025 $21.00 / yr', JSON.stringify(nso));
+    nso[0].head === 'aug 10, 2025 → aug 9 cancelled aug 10, 2025 delete…' && nso[0].charges[0] === 'aug 10, 2025 $21.00 / yr', JSON.stringify(nso));
 
   // no periods
   await page.goto(BASE + '#/s/s3');

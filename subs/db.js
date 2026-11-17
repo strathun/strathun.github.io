@@ -105,6 +105,17 @@ export async function markSubscribed({ period, charge }, setPrice) {
 }
 
 /**
+ * Delete period (SPEC §8.3): the period and all its charges, in one transaction
+ * (migrations/002). Resolves to { period, charge_ids }.
+ */
+export async function deletePeriod(id) {
+  const what = 'delete the period';
+  const data = unwrap(await window.sb.rpc('delete_period', { p_period_id: id }), what, NEEDS_MIGRATION);
+  if (!data?.period || !Array.isArray(data.charge_ids)) throw new DbError(`couldn't ${what}: no rows came back`);
+  return data;
+}
+
+/**
  * Automatic renewal catch-up (SPEC §7.3) for planCatchUpAll()'s work.
  *
  * Charges go in first, then each period's renews_on advances. If the second step

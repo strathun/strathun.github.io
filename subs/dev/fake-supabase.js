@@ -111,6 +111,14 @@
       if (a.p_set_price) Object.assign(s, { price_cents: a.p_amount_cents, price_checked_on: a.p_started_on });
       return { data: { period: copy(period), charge: copy(charge), service: copy(s) }, error: null };
     },
+    delete_period(a) {
+      const period = tables.periods.find((p) => p.id === a.p_period_id);
+      if (!period) return fail('P0002', 'period not found, or not yours');
+      const gone = tables.charges.filter((c) => c.period_id === period.id).map((c) => c.id);
+      tables.charges = tables.charges.filter((c) => c.period_id !== period.id);
+      tables.periods = tables.periods.filter((p) => p !== period);
+      return { data: { period: copy(period), charge_ids: gone }, error: null };
+    },
   };
 
   function rpc(name, args) {
