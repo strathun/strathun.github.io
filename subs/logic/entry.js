@@ -96,10 +96,18 @@ export function cancelDefaults(period, today) {
 /**
  * Mark cancelled form → { row: { cancelled_on, access_ends_on }, errors }.
  * A blank access end takes the default (renews_on − 1 day).
+ * `charges` may be all of the service's charges; only this period's count. A
+ * cancel date before one of them would leave charges after the period ended
+ * (SPEC §7.3): a backfill left open is fixed with Delete period instead.
  */
-export function cancelFromForm(values, { period, today }) {
+export function cancelFromForm(values, { period, charges = [], today }) {
   const errors = {};
   if (period.cancelled_on != null) errors.form = 'this period is already cancelled.';
+
+  let lastCharge = null;
+  for (const c of charges) {
+    if (c.period_id === period.id && (!lastCharge || c.charged_on > lastCharge)) lastCharge = c.charged_on;
+  }
 
   const date = dateField(values.cancelled_on, today);
   if (date.error) errors.cancelled_on = date.error;
@@ -107,6 +115,8 @@ export function cancelFromForm(values, { period, today }) {
     errors.cancelled_on = `can't be before it started (${formatDay(period.started_on, today)})`;
   } else if (period.renews_on && date.value >= period.renews_on) {
     errors.cancelled_on = `that's after its ${formatDay(period.renews_on, today)} renewal. pick an earlier date, or reload so the renewal is recorded first`;
+  } else if (lastCharge && date.value < lastCharge) {
+    errors.cancelled_on = `it was charged on ${formatDay(lastCharge, today)}, so it was still renewing then. if it really ended earlier, delete the period and record it again`;
   }
 
   let accessEndsOn = null;

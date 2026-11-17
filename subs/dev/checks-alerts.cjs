@@ -19,6 +19,8 @@ const SEED = {
     svc({ id: 's6', name: 'Uzzu' }),
     svc({ id: 's7', name: 'Disney+', archived_at: '2026-10-01T00:00:00+00:00' }),
     svc({ id: 's8', name: 'iCloud+', category: 'storage', manage_url: null, manage_path: 'iPhone Settings → iCloud' }),
+    svc({ id: 's9', name: 'Google One', role: 'keeper', category: 'storage', billing_interval: 'annual', price_cents: 5000 }),
+    svc({ id: 's10', name: 'Mubi' }),
   ],
   periods: [
     per('p1', 's1', '2026-11-10', '2026-12-10'),
@@ -30,8 +32,14 @@ const SEED = {
     per('p5', 's5', '2026-11-20', '2026-12-20'), // decide by dec 19: 33 days out, no alert
     per('p6', 's6', '2026-10-01', '2026-11-01', { cancelled_on: '2026-10-01', access_ends_on: '2026-10-31' }),
     per('p8', 's8', '2026-11-10', '2026-12-10'),
+    // a keeper's older open period alerts even far outside the 14-day window
+    per('p9a', 's9', '2025-03-01', '2027-03-01'),
+    per('p9b', 's9', '2026-06-01', '2027-06-01', { cancelled_on: '2026-06-01', access_ends_on: '2026-06-30' }),
+    per('p10', 's10', '2026-11-01', null), // no renewal date on file
   ],
   charges: [
+    chg('c2a', 's2', 'p2a', '2026-03-01', 1500),
+    { ...chg('c2b', 's2', 'p2a', '2026-11-01', 1500), source: 'auto' },
     chg('c6', 's6', 'p6', '2026-10-01', null),
     chg('c7', 's7', null, '2026-09-01', null),
   ],
@@ -54,7 +62,7 @@ const SEED = {
   const alerts = () => page.$$eval('.alert', (els) => els.map((el) => ({
     name: el.querySelector('.alert-name').textContent,
     tag: el.querySelector('.badge').textContent,
-    text: el.querySelector('.alert-text').textContent.replace(/ /g, ' '), // prices are non-breaking
+    text: el.querySelector('.alert-text').textContent.replace(/\u00a0/g, ' '), // prices are non-breaking
     actions: [...el.querySelectorAll('.alert-actions > *')].map((a) => a.textContent.trim()),
   })));
   const alertFor = (name) => `.alert:has(.alert-name:text-is("${name}"))`;
@@ -71,12 +79,14 @@ const SEED = {
     { name: 'Hulu', tag: 'cancel now', text: 'next charge dec 1 · the mar 1 period was never cancelled', actions: ['review periods'] },
     { name: 'iCloud+', tag: 'cancel now', text: 'next charge dec 10', actions: ['mark cancelled'] },
     { name: 'Netflix', tag: 'cancel now', text: 'next charge dec 10', actions: ['manage ↗', 'mark cancelled'] },
+    { name: 'Mubi', tag: 'cancel now', text: 'still renewing', actions: ['manage ↗', 'mark cancelled'] },
     { name: 'Nintendo Switch Online', tag: 'decide by nov 15', text: 'that date has passed · renews nov 17 at $21.00 / yr', actions: ['manage ↗', 'mark cancelled'] },
     { name: 'Spotify', tag: 'decide by nov 24', text: 'renews nov 25 at $11.99 / mo', actions: ['manage ↗', 'mark cancelled'] },
+    { name: 'Google One', tag: 'decide by feb 28, 2027', text: 'renews mar 1, 2027 at $50.00 / yr · the mar 1, 2025 period was never cancelled', actions: ['review periods'] },
     { name: 'Uzzu', tag: 'amount unknown', text: '1 charge has no amount', actions: ['edit charges'] },
   ];
   check('alerts: order, tags, text and actions', JSON.stringify(list) === JSON.stringify(want), JSON.stringify(list, null, 1));
-  check('alerts title counts them', (await text('#alerts-title')) === 'alerts6');
+  check('alerts title counts them', (await text('#alerts-title')) === 'alerts8');
   check('alerts come before the checklist and the groups', await page.evaluate(() => {
     const view = document.getElementById('view');
     const kids = [...view.children].filter((el) => el.matches('section'));
@@ -85,7 +95,7 @@ const SEED = {
   check('archived Disney+ and far-off Claude have no alert', !list.some((a) => a.name === 'Disney+' || a.name === 'Claude'));
   check('only the passed decide-by is marked overdue', (await page.$$eval('.alert.is-overdue .alert-name', (els) => els.map((e) => e.textContent))).join() === 'Nintendo Switch Online');
   check('manage link opens the real page in a new tab', (await page.getAttribute(`${alertFor('Netflix')} a.btn`, 'href')) === 'https://www.netflix.com/cancelplan' && (await page.getAttribute(`${alertFor('Netflix')} a.btn`, 'target')) === '_blank' && (await page.getAttribute(`${alertFor('Netflix')} a.btn`, 'rel')) === 'noopener noreferrer');
-  check('buttons name their service for screen readers', (await page.getAttribute(`${alertFor('Netflix')} button`, 'aria-label')) === 'mark Netflix cancelled');
+  check('accessible names start with the visible label', (await page.getAttribute(`${alertFor('Netflix')} button`, 'aria-label')) === 'mark cancelled: Netflix' && (await page.getAttribute(`${alertFor('Netflix')} a.btn`, 'aria-label')) === 'manage: Netflix, opens in a new tab');
   check('badges stay on rows, not in alerts', !list.some((a) => /verify|price/.test(a.tag)));
   check('alerts 375: no sideways scroll', await noSideScroll());
   await page.screenshot({ path: `${h.SHOTS}/alerts-375.png`, fullPage: true });
@@ -97,6 +107,12 @@ const SEED = {
   check('acceptance 19: review periods opens the detail, archive is off', (await text('.detail-status')) === 'active · renews dec 1' && !(await page.isEnabled('[data-action="archive"]')));
   check('acceptance 19: history shows the open mar 1 period with its delete', (await text('.period.is-open .period-head')) === 'mar 1 → renewing next charge dec 1 delete…');
   check('acceptance 19: mark cancelled offered for the open period', await page.isVisible('.btn-primary[data-action="cancel"]'));
+  await page.click('.btn-primary[data-action="cancel"]');
+  await page.fill('#cancel-date', '2026-03-01');
+  await page.click('#cancel-save');
+  check('cancelling before a recorded charge is refused (SPEC §7.3)', (await text('[data-for="cancelled_on"]')) === 'it was charged on nov 1, so it was still renewing then. if it really ended earlier, delete the period and record it again' && await open('cancel-modal'));
+  check('nothing saved', (await fake(() => window.__fake.tables.periods.find((p) => p.id === 'p2a').cancelled_on)) === null);
+  await page.keyboard.press('Escape');
   await page.goBack();
   await page.waitForSelector('.alerts');
 
@@ -113,7 +129,7 @@ const SEED = {
   await page.click('#cancel-save');
   await closed('cancel-modal');
   check('acceptance 20: still on the dashboard', (await page.$('.subs-header')) !== null && (await page.$('.detail')) === null);
-  check('acceptance 20: Netflix alert gone, count down to 5', !(await alerts()).some((a) => a.name === 'Netflix') && (await text('#alerts-title')) === 'alerts5');
+  check('acceptance 20: Netflix alert gone, count down to 7', !(await alerts()).some((a) => a.name === 'Netflix') && (await text('#alerts-title')) === 'alerts7');
   check('acceptance 20: toast and group show active until', (await text('#toast')) === 'cancelled Netflix · active until dec 9' && (await groups())['active until…'].includes('Netflix'));
   const p1 = await fake(() => window.__fake.tables.periods.find((p) => p.id === 'p1'));
   check('saved the cancellation', p1.cancelled_on === '2026-11-16' && p1.access_ends_on === '2026-12-09', JSON.stringify(p1));

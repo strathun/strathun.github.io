@@ -94,6 +94,16 @@ test('acceptance 19: Cancel now and Decide by follow an older uncancelled period
   ]);
 });
 
+test('a keeper with an older open period gets Decide by however far off the date is', () => {
+  // Annual: the Mar 2025 backfill was caught up to Mar 2027, months outside the 14-day window.
+  const periods = [
+    period({ started_on: '2025-03-01', renews_on: '2027-03-01' }),
+    period({ started_on: '2026-06-01', renews_on: '2027-06-01', cancelled_on: '2026-06-01', access_ends_on: '2026-06-30' }),
+  ];
+  const alerts = alertsFor({ service: svc({ role: 'keeper', billing_interval: 'annual' }), periods, today: TODAY });
+  assert.deepEqual(alerts, [{ type: 'decide_by', date: '2027-02-28', overdue: false, renewsOn: '2027-03-01', olderStart: '2025-03-01' }]);
+});
+
 test('olderStart stays null for an open period sharing the latest start date', () => {
   const twin = period({ started_on: '2026-11-01', renews_on: '2026-12-01', cancelled_on: '2026-11-01', access_ends_on: '2026-11-30' });
   const alerts = alertsFor({ service: svc({ role: 'rotator' }), periods: [twin, renewing('2026-12-01')], today: TODAY });

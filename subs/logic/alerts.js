@@ -31,7 +31,8 @@ export function alertsFor({ service, periods = [], charges = [], today }) {
       alerts.push({ type: 'cancel_now', renewsOn, olderStart });
     } else if (service.role === 'keeper' && renewsOn) {
       const date = addDays(renewsOn, -(service.cancel_lead_days ?? 1));
-      if (daysBetween(today, date) <= DECIDE_WINDOW_DAYS) {
+      // An older period left open is a data problem, not a decision: show it whenever.
+      if (olderStart || daysBetween(today, date) <= DECIDE_WINDOW_DAYS) {
         alerts.push({ type: 'decide_by', date, overdue: date < today, renewsOn, olderStart });
       }
     }

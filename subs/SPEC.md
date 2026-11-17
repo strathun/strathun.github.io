@@ -5,7 +5,8 @@ Status: Draft v1.7 · Owner: Hunter · Route: `strathun.github.io/subs/`
 **Changelog**
 - v1.7 (2026-11-17): settled the alerts gaps before building step 4's alerts slice.
   - A service with an uncancelled period is `renewing`, even when a later period was cancelled. Catch-up still bills that period, so Cancel now, Decide by, the dashboard group, the Archive guard, the projection and Next up all follow it (§7.1).
-  - Cancel now and Decide by say when the renewing period started before another one, the usual sign of a backfill left uncancelled, and link to the period history to fix it (§7.2, §8.1).
+  - Cancel now and Decide by say when the renewing period started before another one, the usual sign of a backfill left uncancelled, and link to the period history to fix it. A keeper's shows whatever the 14-day window says (§7.2, §8.1).
+  - Mark cancelled can't go back before the period's latest charge (§7.3).
   - The dashboard Alerts list: order, what each alert offers, hidden when empty (§8.1).
 - v1.6 (2026-11-17): rules settled while building step 4's data entry.
   - Mark subscribed refuses an archived service, a billing interval that changed since the page loaded, and a date so far back that catch-up would record over 1000 renewals (§7.3).
@@ -174,7 +175,7 @@ Access end is `access_ends_on`, or `renews_on - 1 day` if it was left blank.
 Archived services show no alerts.
 - **Cancel now**: `role = rotator` and status `renewing`.
 - **Decide by {date}**: `role = keeper`, status `renewing`, and the decide-by date (`renews_on - cancel_lead_days`) is 14 days away or less. It stays up after that date passes, until the renewal is recorded.
-- Both use the renewing period (§7.1). When it started before another period, the alert says so, since that's usually a backfill left uncancelled. Catch-up has recorded its renewals since, so the fix is usually Delete period, then Mark subscribed again and cancel straight away (Mark cancelled now would keep those charges).
+- Both use the renewing period (§7.1). When it started before another period, the alert says so, since that's usually a backfill left uncancelled. A keeper then gets Decide by however far off its date is: it's a data problem, not a decision. Catch-up has usually recorded renewals on it since, so the fix is Delete period, then Mark subscribed again and cancel straight away (Mark cancelled can't go back past those charges, §7.3).
 - **Verify link**: `url_verified = false`.
 - **Price unknown**: `price_cents` is null.
 - **Check price**: `price_cents` is set and `price_checked_on` is blank or more than 180 days old.
@@ -190,6 +191,7 @@ Archived services show no alerts.
   - is refused for an archived service (restore it first: an archived service shows no alerts, so it must not start renewing), and when the service's billing interval changed since the page loaded (reload, so `renews_on` uses the right interval).
 - **Mark cancelled**: sets `cancelled_on` (default today). Default `access_ends_on = renews_on - 1 day`, editable, because the service's confirmation screen states the real date.
   - `cancelled_on` can't be in the future or before `started_on`. `access_ends_on` can't be before `cancelled_on` (it can be the same day, e.g. a refund that ends access at once).
+  - `cancelled_on` can't be before the period's latest charge: it was still renewing on that date. The same day is fine (cancel on day one). If it really ended earlier, the charges are wrong: Delete period and record it again.
   - **Backfill with a renewal pending** (`renews_on <= today`, so catch-up hasn't run yet): the default is `started_on` (cancel on day one), and a date on or after `renews_on` is refused, because that renewal's charge would never be recorded. To record a cancellation after it, reload first so catch-up records the renewal.
 - **Automatic renewal catch-up** runs on app load, for each period with `cancelled_on` null and `renews_on <= today`:
   1. insert a charge (`charged_on = renews_on`, `amount_cents = price_cents`, `source = auto`);
