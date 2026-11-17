@@ -31,15 +31,27 @@
   .subs-title small { color: var(--muted); font-size: 12px; margin-left: 8px; font-weight: 400; }
 
   .btn {
-    background: var(--bg2); color: var(--text); border: 1px solid var(--border);
+    display: inline-block; background: var(--bg2); color: var(--text); border: 1px solid var(--border);
     padding: 8px 14px; border-radius: var(--radius);
-    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600; line-height: 1.4;
     cursor: pointer; transition: opacity .15s, border-color .15s;
   }
   .btn:hover { border-color: var(--border2); }
   .btn:disabled { opacity: .5; cursor: default; }
   .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--text); }
   .btn-primary:hover { opacity: .88; border-color: var(--accent); }
+  .btn-danger {
+    color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+  }
+  .btn-danger:hover { border-color: var(--danger); }
+  .link-btn {
+    background: none; border: none; padding: 4px 0; margin-bottom: 12px; cursor: pointer;
+    font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+  }
+  .link-btn:hover { color: var(--text); }
+  .muted { color: var(--muted); }
+  .small { font-size: 11px; }
 
   /* ── service groups ── */
   .group { margin-bottom: 24px; }
@@ -57,7 +69,9 @@
     padding: 10px 12px; color: var(--text); font-family: var(--font-mono);
     cursor: pointer; transition: border-color .15s, background .15s;
   }
-  .service-row:hover { border-color: var(--border2); background: var(--bg2); }
+  .service-row:hover { border-color: var(--border2); background: var(--bg2); opacity: 1; }
+  .service-row.is-archived { opacity: .65; }
+  .service-row.is-archived:hover { opacity: 1; }
   .service-row:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
   .row-main { min-width: 0; }
   .row-name {
@@ -81,6 +95,39 @@
     background: color-mix(in srgb, var(--warn) 8%, transparent);
   }
   .badge-muted { border-style: dashed; }
+
+  /* ── service detail ── */
+  .back { display: inline-block; font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+  .back:hover { color: var(--text); opacity: 1; }
+  .detail {
+    background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 18px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .detail-name { font-size: 18px; font-weight: 600; overflow-wrap: anywhere; line-height: 1.3; }
+  .detail-head .row-sub { margin-top: 4px; }
+  .detail-status { font-size: 13px; }
+  .status-renewing { color: var(--accent2); }
+  .status-ending { color: var(--warn); }
+  .status-inactive, .status-archived { color: var(--muted); }
+  .detail-section p + p { margin-top: 8px; }
+  .detail-links { display: flex; flex-wrap: wrap; gap: 8px; }
+  .detail-links + .manage-path, .detail-links + p, .manage-path + p { margin-top: 10px; }
+  .manage-path {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px 11px; font-size: 12px; overflow-wrap: anywhere;
+  }
+  .manage-path .field-label { margin-bottom: 2px; }
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; font-size: 13px; }
+  .kv dt {
+    color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; padding-top: 3px;
+  }
+  .kv dd { overflow-wrap: anywhere; }
+  .kv .notes { white-space: pre-wrap; }
+  .detail-actions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    border-top: 1px solid var(--border); padding-top: 14px;
+  }
+  .detail-actions p { flex-basis: 100%; }
 
   .empty, .loading-msg, .load-error {
     text-align: center; padding: 40px 20px; color: var(--muted); font-size: 12px;
@@ -156,7 +203,9 @@
   .modal-error { font-size: 12px; color: var(--danger); min-height: 16px; margin-top: 4px; }
   .modal-actions { display: flex; gap: 10px; margin-top: 12px; }
   .modal-actions .btn { padding: 10px 14px; font-size: 13px; }
-  .modal-actions .btn-primary { flex: 1; }
+  .modal-actions .btn-primary, .modal-actions .btn-danger { flex: 1; }
+  .del-warning { margin-bottom: 14px; }
+  .del-warning strong { color: var(--text); }
 
   /* ── toast ── */
   .toast {
@@ -190,12 +239,7 @@
 
 <div id="app" class="hidden">
   <main class="subs">
-    <div class="subs-header">
-      <div class="subs-title">subscriptions <small id="service-count"></small></div>
-      <button class="btn btn-primary" data-action="add">+ add service</button>
-    </div>
-
-    <div id="services"><div class="loading-msg">loading…</div></div>
+    <div id="view"><div class="loading-msg">loading…</div></div>
   </main>
 </div>
 
@@ -288,6 +332,31 @@
       <div class="modal-actions">
         <button class="btn" type="button" data-action="close-form">cancel</button>
         <button class="btn btn-primary" type="submit" id="svc-save">save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Delete permanently (SPEC §8.4): archived services only, typed confirmation ── -->
+<div class="overlay" id="del-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="del-title">
+    <div class="modal-title">
+      <span id="del-title">delete permanently</span>
+      <button class="close-btn" type="button" data-action="close-delete" aria-label="close">×</button>
+    </div>
+    <form id="del-form" novalidate autocomplete="off">
+      <p class="small muted del-warning">
+        this removes <strong id="del-name"></strong> with all its periods,
+        charges and watchlist, and changes past spend. it can't be undone. leaving it archived keeps the history.
+      </p>
+      <div class="field">
+        <label for="del-confirm">type the service name to confirm</label>
+        <input id="del-confirm" type="text" spellcheck="false" autocapitalize="off">
+      </div>
+      <div class="modal-error" id="del-error" role="alert"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-delete">cancel</button>
+        <button class="btn btn-danger" type="submit" id="del-go" disabled>delete forever</button>
       </div>
     </form>
   </div>

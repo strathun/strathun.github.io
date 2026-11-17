@@ -3,22 +3,30 @@
 //
 // This is a module, so its functions aren't globals: markup uses data-action
 // attributes and one delegated click listener instead of onclick="…".
+//
+// Views are picked by the URL hash, so the browser back button works:
+//   #/        dashboard
+//   #/s/{id}  service detail
 
 import { todayLocal, formatDay } from './logic/dates.js';
-import { groupByService } from './logic/status.js';
+import { groupByService, serviceStatus } from './logic/status.js';
 import {
   CATEGORIES, INTERVALS, formatPrice, formValues, serviceFromForm,
-  findNameConflict, groupServices, serviceBadges,
+  findNameConflict, groupServices, serviceBadges, canArchive, isWebUrl,
 } from './logic/services.js';
 import * as db from './db.js';
 
 const state = {
+  loaded: false,
   services: [],
   periodsByService: new Map(),
+  showArchived: false,
 };
 
 /** The service open in the form, or null when adding a new one. */
 let editing = null;
+/** The service open in the delete dialog. */
+let deleting = null;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -38,6 +46,22 @@ function toast(msg, { error = false } = {}) {
   toast.timer = setTimeout(() => el.classList.remove('show'), error ? 4000 : 1800);
 }
 
+/** Disables the clicked button while `fn` runs, so a double click can't send twice. */
+async function busy(button, fn) {
+  if (button) button.disabled = true;
+  try {
+    await fn();
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+const findService = (id) => state.services.find((s) => s.id === id) ?? null;
+const detailHref = (id) => `#/s/${encodeURIComponent(id)}`;
+
+/** Local calendar date of a timestamptz such as archived_at. */
+const localDay = (timestamp) => todayLocal(new Date(timestamp));
+
 // ── data ────────────────────────────────────────────────────────────────────
 
 async function load() {
@@ -45,9 +69,10 @@ async function load() {
     const { services, periods } = await db.loadAll();
     state.services = services;
     state.periodsByService = groupByService(periods);
+    state.loaded = true;
     render();
   } catch (err) {
-    $('#services').innerHTML = `
+    $('#view').innerHTML = `
       <div class="load-error">
         <p>${esc(err.message)}</p>
         <button class="btn" data-action="reload">try again</button>
@@ -59,6 +84,25 @@ function upsertLocal(row) {
   const i = state.services.findIndex((s) => s.id === row.id);
   if (i === -1) state.services.push(row);
   else state.services[i] = row;
+}
+
+function removeLocal(id) {
+  state.services = state.services.filter((s) => s.id !== id);
+  state.periodsByService.delete(id);
+}
+
+// ── routing ─────────────────────────────────────────────────────────────────
+
+function currentRoute() {
+  const match = /^#\/s\/([^/]+)$/.exec(location.hash);
+  return match ? { view: 'detail', id: decodeURIComponent(match[1]) } : { view: 'dashboard' };
+}
+
+function render() {
+  if (!state.loaded) return;
+  const route = currentRoute();
+  if (route.view === 'detail') renderDetail(route.id);
+  else renderDashboard();
 }
 
 // ── dashboard (SPEC §8.1) ───────────────────────────────────────────────────
@@ -79,61 +123,170 @@ const BADGES = {
   },
 };
 
-function render() {
+function badgesHtml(service, today) {
+  return serviceBadges(service, today)
+    .map((a) => {
+      const b = BADGES[a.type];
+      return `<span class="badge ${b.cls}" title="${esc(b.title(a, today))}">${b.label}</span>`;
+    })
+    .join('');
+}
+
+function subline(service) {
+  const role = `<span class="role-${esc(service.role)}">${esc(service.role)}</span>`;
+  return service.category ? `${role} · ${esc(service.category)}` : role;
+}
+
+function renderDashboard() {
   const today = todayLocal();
   const groups = groupServices(state.services, state.periodsByService, today);
-  const shown = GROUPS.filter(([key]) => groups[key].length);
   const count = state.services.length - groups.archived.length;
-  $('#service-count').textContent = count ? String(count) : '';
+  const header = `
+    <div class="subs-header">
+      <div class="subs-title">subscriptions <small>${count || ''}</small></div>
+      <button class="btn btn-primary" data-action="add">+ add service</button>
+    </div>`;
 
   if (!state.services.length) {
-    $('#services').innerHTML = `
+    $('#view').innerHTML = `${header}
       <div class="empty">
         <p>no services yet.</p>
         <p><button class="btn btn-primary" data-action="add">+ add service</button></p>
       </div>`;
     return;
   }
-  if (!shown.length) {
-    $('#services').innerHTML = `<div class="empty"><p>every service is archived.</p></div>`;
-    return;
+
+  const sections = GROUPS.filter(([key]) => groups[key].length)
+    .map(([key, label]) => groupHtml(label, groups[key], today))
+    .join('');
+  const none = count ? '' : `<div class="empty"><p>every service is archived.</p></div>`;
+
+  let archived = '';
+  if (groups.archived.length) {
+    archived = `
+      <button class="link-btn" data-action="toggle-archived" aria-expanded="${state.showArchived}">
+        ${state.showArchived ? 'hide' : 'show'} archived (${groups.archived.length})
+      </button>
+      ${state.showArchived ? groupHtml('archived', groups.archived, today, 'is-archived') : ''}`;
   }
 
-  $('#services').innerHTML = shown
-    .map(([key, label]) => `
-      <section class="group">
-        <h2 class="group-title">${label}<small>${groups[key].length}</small></h2>
-        <ul class="service-list">${groups[key].map((entry) => rowHtml(entry, today)).join('')}</ul>
-      </section>`)
-    .join('');
+  $('#view').innerHTML = header + sections + none + archived;
 }
 
-function rowHtml({ service, status, accessEndsOn }, today) {
-  const badges = serviceBadges(service, today)
-    .map((a) => {
-      const b = BADGES[a.type];
-      return `<span class="badge ${b.cls}" title="${esc(b.title(a, today))}">${b.label}</span>`;
-    })
-    .join('');
-  const role = `<span class="role-${esc(service.role)}">${esc(service.role)}</span>`;
-  const sub = service.category ? `${role} · ${esc(service.category)}` : role;
-  const until = status === 'ending'
+function groupHtml(label, entries, today, rowClass = '') {
+  return `
+    <section class="group">
+      <h2 class="group-title">${label}<small>${entries.length}</small></h2>
+      <ul class="service-list">${entries.map((e) => rowHtml(e, today, rowClass)).join('')}</ul>
+    </section>`;
+}
+
+function rowHtml({ service, status, accessEndsOn }, today, rowClass) {
+  const badges = badgesHtml(service, today);
+  const until = status === 'ending' && !service.archived_at
     ? `<span class="row-until">until ${esc(formatDay(accessEndsOn, today))}</span>`
     : '';
-
   return `
     <li>
-      <button class="service-row" data-action="edit" data-id="${esc(service.id)}">
+      <a class="service-row ${rowClass}" href="${detailHref(service.id)}">
         <span class="row-main">
           <span class="row-name">${esc(service.name)}</span>
-          <span class="row-sub">${sub}</span>
+          <span class="row-sub">${subline(service)}</span>
         </span>
         <span class="row-side">
           <span class="row-price">${esc(formatPrice(service))}</span>${until}
         </span>
         ${badges ? `<span class="row-badges">${badges}</span>` : ''}
-      </button>
+      </a>
     </li>`;
+}
+
+// ── service detail (SPEC §8.3) ──────────────────────────────────────────────
+
+function statusText({ status, period, accessEndsOn }, today) {
+  if (status === 'renewing') {
+    return period.renews_on ? `active · renews ${formatDay(period.renews_on, today)}` : 'active';
+  }
+  if (status === 'ending') return `active until ${formatDay(accessEndsOn, today)}`;
+  return accessEndsOn ? `inactive · ended ${formatDay(accessEndsOn, today)}` : 'inactive';
+}
+
+function manageHtml(service) {
+  const parts = [];
+  if (isWebUrl(service.manage_url)) {
+    parts.push(`<a class="btn btn-primary" href="${esc(service.manage_url)}" target="_blank" rel="noopener noreferrer">open manage page ↗</a>`);
+  }
+  if (isWebUrl(service.help_url)) {
+    parts.push(`<a class="btn" href="${esc(service.help_url)}" target="_blank" rel="noopener noreferrer">how to cancel ↗</a>`);
+  }
+  const path = service.manage_path
+    ? `<div class="manage-path"><span class="field-label">manage path</span>${esc(service.manage_path)}</div>`
+    : '';
+  const none = !parts.length && !path ? `<p class="muted">no manage link yet. edit to add one.</p>` : '';
+  const verify = service.manage_url && !service.url_verified
+    ? `<p class="muted small">this link is a best guess. once you've used it, edit the service and tick "link verified" (or paste where the browser really landed).</p>`
+    : '';
+  return `${parts.length ? `<div class="detail-links">${parts.join('')}</div>` : ''}${path}${none}${verify}`;
+}
+
+function priceText(service, today) {
+  if (service.price_cents == null) return 'unknown';
+  const checked = service.price_checked_on
+    ? `checked ${formatDay(service.price_checked_on, today)}`
+    : 'never checked';
+  return `${formatPrice(service)} <span class="muted">· ${checked}</span>`;
+}
+
+function renderDetail(id) {
+  const service = findService(id);
+  const back = `<a class="back" href="#/">← all services</a>`;
+  if (!service) {
+    $('#view').innerHTML = `${back}<div class="empty"><p>that service doesn't exist (or was deleted).</p></div>`;
+    return;
+  }
+
+  const today = todayLocal();
+  const status = serviceStatus(state.periodsByService.get(service.id) ?? [], today);
+  const badges = badgesHtml(service, today);
+  const lead = service.cancel_lead_days;
+
+  let actions;
+  if (service.archived_at) {
+    actions = `
+      <button class="btn" data-action="restore" data-id="${esc(service.id)}">restore</button>
+      <button class="btn btn-danger" data-action="delete" data-id="${esc(service.id)}">delete permanently…</button>`;
+  } else {
+    const allowed = canArchive(status.status);
+    actions = `
+      <button class="btn" data-action="edit" data-id="${esc(service.id)}">edit</button>
+      <button class="btn" data-action="archive" data-id="${esc(service.id)}" ${allowed ? '' : 'disabled aria-describedby="archive-hint"'}>archive</button>
+      ${allowed ? '' : `<p class="muted small" id="archive-hint">still renewing. mark it cancelled before archiving, so its charges can't continue unseen.</p>`}`;
+  }
+
+  $('#view').innerHTML = `
+    ${back}
+    <article class="detail">
+      <header class="detail-head">
+        <h1 class="detail-name">${esc(service.name)}</h1>
+        <div class="row-sub">${subline(service)}</div>
+      </header>
+
+      <div class="detail-status status-${service.archived_at ? 'archived' : status.status}">
+        ${service.archived_at ? `archived ${esc(formatDay(localDay(service.archived_at), today))} · ` : ''}${esc(statusText(status, today))}
+      </div>
+      ${badges ? `<div class="row-badges">${badges}</div>` : ''}
+
+      <section class="detail-section">${manageHtml(service)}</section>
+
+      <dl class="kv">
+        <dt>price</dt><dd>${priceText(service, today)}</dd>
+        <dt>billed</dt><dd>${esc(service.billing_interval)}</dd>
+        <dt>cancel by</dt><dd>${lead} day${lead === 1 ? '' : 's'} before renewal</dd>
+        ${service.notes ? `<dt>notes</dt><dd class="notes">${esc(service.notes)}</dd>` : ''}
+      </dl>
+
+      <div class="detail-actions">${actions}</div>
+    </article>`;
 }
 
 // ── add / edit form (SPEC §8.4) ─────────────────────────────────────────────
@@ -225,36 +378,137 @@ async function saveForm(event) {
   }
 }
 
+// ── archive / restore / delete (SPEC §8.4) ──────────────────────────────────
+
+async function archive(button) {
+  const service = findService(button.dataset.id);
+  if (!service) return;
+  const { status } = serviceStatus(state.periodsByService.get(service.id) ?? [], todayLocal());
+  if (!canArchive(status)) {
+    toast('still renewing. mark it cancelled first.', { error: true });
+    return;
+  }
+  await busy(button, async () => {
+    try {
+      upsertLocal(await db.archiveService(service.id));
+      render();
+      toast(`archived ${service.name}`);
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  });
+}
+
+async function restore(button) {
+  const service = findService(button.dataset.id);
+  if (!service) return;
+  await busy(button, async () => {
+    try {
+      upsertLocal(await db.restoreService(service.id));
+      render();
+      toast(`restored ${service.name}`);
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  });
+}
+
+function openDelete(button) {
+  const service = findService(button.dataset.id);
+  if (!service?.archived_at) {
+    toast('archive a service before deleting it.', { error: true });
+    return;
+  }
+  deleting = service;
+  $('#del-name').textContent = service.name;
+  $('#del-confirm').value = '';
+  $('#del-go').disabled = true;
+  $('#del-error').textContent = '';
+  $('#del-modal').classList.add('open');
+  $('#del-confirm').focus();
+}
+
+function closeDelete() {
+  $('#del-modal').classList.remove('open');
+  deleting = null;
+}
+
+const deleteTyped = () => deleting && $('#del-confirm').value.trim() === deleting.name;
+
+async function confirmDelete(event) {
+  event.preventDefault();
+  if (!deleteTyped()) return;
+  const service = deleting;
+  const go = $('#del-go');
+  go.disabled = true;
+  go.textContent = 'deleting…';
+  try {
+    await db.deleteService(service.id);
+    removeLocal(service.id);
+    closeDelete();
+    if (location.hash !== '#/') location.hash = '#/';
+    else render();
+    toast(`deleted ${service.name}`);
+  } catch (err) {
+    $('#del-error').textContent = err.message;
+    go.disabled = !deleteTyped();
+  } finally {
+    go.textContent = 'delete forever';
+  }
+}
+
 // ── events ──────────────────────────────────────────────────────────────────
 
 const ACTIONS = {
   add: () => openForm(),
   edit: (el) => {
-    const service = state.services.find((s) => s.id === el.dataset.id);
+    const service = findService(el.dataset.id);
     if (service) openForm(service);
     else toast('that service is gone. reload the page.', { error: true });
   },
   'close-form': closeForm,
+  'close-delete': closeDelete,
+  'toggle-archived': () => {
+    state.showArchived = !state.showArchived;
+    render();
+  },
+  archive,
+  restore,
+  delete: openDelete,
   reload: load,
 };
 
 document.addEventListener('click', (event) => {
   const el = event.target.closest('[data-action]');
-  if (el && ACTIONS[el.dataset.action]) ACTIONS[el.dataset.action](el);
+  if (el && !el.disabled && ACTIONS[el.dataset.action]) ACTIONS[el.dataset.action](el);
 });
 
 form.addEventListener('submit', saveForm);
+$('#del-form').addEventListener('submit', confirmDelete);
+$('#del-confirm').addEventListener('input', () => { $('#del-go').disabled = !deleteTyped(); });
 
-// Close on a click that starts and ends on the backdrop, so selecting text in
-// a field and releasing outside the modal doesn't throw the form away.
-let downOnBackdrop = false;
-$('#svc-modal').addEventListener('mousedown', (e) => { downOnBackdrop = e.target.id === 'svc-modal'; });
-$('#svc-modal').addEventListener('click', (e) => {
-  if (downOnBackdrop && e.target.id === 'svc-modal') closeForm();
+window.addEventListener('hashchange', () => {
+  render();
+  window.scrollTo(0, 0);
 });
 
+// Close a dialog on a click that starts and ends on its backdrop, so selecting
+// text in a field and releasing outside the dialog doesn't throw the form away.
+const CLOSERS = { 'svc-modal': closeForm, 'del-modal': closeDelete };
+for (const [id, close] of Object.entries(CLOSERS)) {
+  const overlay = document.getElementById(id);
+  let downOnBackdrop = false;
+  overlay.addEventListener('mousedown', (e) => { downOnBackdrop = e.target === overlay; });
+  overlay.addEventListener('click', (e) => {
+    if (downOnBackdrop && e.target === overlay) close();
+  });
+}
+
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && $('#svc-modal').classList.contains('open')) closeForm();
+  if (e.key !== 'Escape') return;
+  for (const [id, close] of Object.entries(CLOSERS)) {
+    if (document.getElementById(id).classList.contains('open')) close();
+  }
 });
 
 // ── boot ────────────────────────────────────────────────────────────────────
