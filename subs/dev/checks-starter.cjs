@@ -49,9 +49,7 @@ async function reloadKeepingData(page) {
     check('13 services shown, count 13', (await page.$$('.service-row')).length === 13 && (await page.textContent('.subs-title small')) === '13');
     check('toast', (await page.textContent('#toast')) === 'loaded 13 services');
     check('checklist shows pricing progress', (await page.textContent('.checklist .progress')) === '2 of 13 priced');
-    // Mark subscribed exists now; mark cancelled (and so backfilling) arrive next.
-    const later = await page.$$eval('.checklist li', (lis) => lis.map((li) => li.querySelector('.later') !== null));
-    check('only unbuilt items marked step 4', JSON.stringify(later) === JSON.stringify([false, false, true, true]), JSON.stringify(later));
+    check('no item says it arrives later (mark subscribed/cancelled exist)', !(await page.textContent('.checklist')).includes('arrives in step'));
     check('starter button gone once services exist', (await page.$$('[data-action="load-starter"]')).length === 0);
     check('375: no sideways scroll', await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
     await page.screenshot({ path: `${h.SHOTS}/checklist-375.png`, fullPage: true });

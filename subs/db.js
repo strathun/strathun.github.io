@@ -103,3 +103,15 @@ export async function markSubscribed({ period, charge }, setPrice) {
   if (!data?.period || !data?.charge || !data?.service) throw new DbError(`couldn't ${what}: no rows came back`);
   return data;
 }
+
+/**
+ * Mark cancelled: sets cancelled_on and access_ends_on. Only a period that is still
+ * uncancelled matches, so a second tab can't overwrite the first one's dates.
+ */
+export async function cancelPeriod(id, row) {
+  const what = 'mark it cancelled';
+  const res = await window.sb.from('periods').update(row).eq('id', id).is('cancelled_on', null).select();
+  const rows = unwrap(res, what);
+  if (!rows?.length) throw new DbError(`couldn't ${what}: it's already cancelled, gone, or not yours. reload the page.`);
+  return rows[0];
+}

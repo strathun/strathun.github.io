@@ -9,13 +9,16 @@
 //   #/s/{id}  service detail
 
 import { todayLocal, formatDay } from './logic/dates.js';
-import { groupByService, serviceStatus, openPeriod } from './logic/status.js';
+import { groupByService, serviceStatus, openPeriod, accessEnd } from './logic/status.js';
 import {
   CATEGORIES, INTERVALS, INTERVAL_SHORT, formatCents, formatPrice, formValues, serviceFromForm,
   findNameConflict, groupServices, serviceBadges, canArchive, isWebUrl, setupProgress, parseCents,
 } from './logic/services.js';
 import { periodHistory } from './logic/history.js';
-import { setPriceOption, subscribeDefaults, subscribeFromForm } from './logic/entry.js';
+import {
+  setPriceOption, subscribeDefaults, subscribeFromForm,
+  renewalPending, cancelDefaults, cancelFromForm,
+} from './logic/entry.js';
 import { starterRows } from './logic/starter.js';
 import * as db from './db.js';
 
@@ -231,7 +234,6 @@ function renderDashboard() {
 function checklistHtml() {
   const { priced, total } = setupProgress(state.services);
   const pricesDone = total > 0 && priced === total;
-  const later = '<span class="later">arrives in step 4</span>';
   return `
     <section class="checklist" aria-labelledby="checklist-title">
       <div class="checklist-head">
@@ -248,8 +250,11 @@ function checklistHtml() {
           (spotify, uzzu, nintendo, claude, google one, paramount+, amazon prime, icloud+, netflix, ps plus).
           annual keepers (nintendo, google one, prime) may go back to 2025; that's what makes this year's spend right.
         </li>
-        <li>for rotators you've already cancelled (or cancel now), mark cancelled. ${later}</li>
-        <li>optional: backfill earlier rotations this year, so the year view and averages cover the whole year. ${later}</li>
+        <li>for rotators you've already cancelled (or cancel now), mark cancelled.</li>
+        <li>
+          optional: backfill earlier rotations this year, so the year view and averages cover the whole year:
+          mark subscribed on the day it started, then mark cancelled straight away.
+        </li>
       </ol>
     </section>`;
 }
@@ -370,6 +375,7 @@ function renderDetail(id) {
         : "still renewing. mark it cancelled before subscribing again or archiving, so its charges can't continue unseen.";
     const off = 'disabled aria-describedby="actions-hint"';
     actions = `
+      ${open ? `<button class="btn btn-primary" data-action="cancel" data-id="${id}">mark cancelled</button>` : ''}
       <button class="btn ${open ? '' : 'btn-primary'}" data-action="subscribe" data-id="${id}" ${open ? off : ''}>mark subscribed</button>
       <button class="btn" data-action="edit" data-id="${id}">edit</button>
       <button class="btn" data-action="archive" data-id="${id}" ${allowed ? '' : off}>archive</button>
@@ -763,6 +769,93 @@ async function saveSubscribe(event) {
     return () => {
       render();
       toast(`marked ${service.name} subscribed`);
+      // SPEC §9 rotate-in step 3: prompt to cancel auto-renew straight away.
+      const prompt = cancelPrompt(service, saved.period, todayLocal());
+      if (prompt) openCancel(findService(service.id) ?? service, { prompt });
+    };
+  });
+}
+
+// ── mark cancelled (SPEC §7.3) ──────────────────────────────────────────────
+
+const cancelForm = $('#cancel-form');
+const cancelField = (name) => cancelForm.elements.namedItem(name);
+/** { service, period } in the Mark cancelled dialog. */
+let cancelling = null;
+
+/**
+ * What to ask right after Mark subscribed, or null: a backfill with a pending
+ * renewal (did it end back then?), or any rotator (cancel on day one, SPEC §9).
+ */
+function cancelPrompt(service, period, today) {
+  if (renewalPending(period, today)) {
+    return `did this period end? if you cancelled back then, record it now. otherwise the next load adds its renewals since ${formatDay(period.renews_on, today)}.`;
+  }
+  if (service.role === 'rotator') {
+    return 'cancel auto-renew now? rotators get cancelled on day one: access runs to the end of the paid period.';
+  }
+  return null;
+}
+
+function promptManageHtml(service) {
+  if (isWebUrl(service.manage_url)) {
+    return `<a class="btn" href="${esc(service.manage_url)}" target="_blank" rel="noopener noreferrer">open manage page ↗</a>`;
+  }
+  if (service.manage_path) {
+    return `<div class="manage-path"><span class="field-label">manage path</span>${esc(service.manage_path)}</div>`;
+  }
+  return '';
+}
+
+function openCancel(service, { prompt = null } = {}) {
+  const period = openPeriod(periodsOf(service.id));
+  if (!period) {
+    toast('nothing to cancel: no period is renewing.', { error: true });
+    return;
+  }
+  cancelling = { service, period };
+  const today = todayLocal();
+  const values = cancelDefaults(period, today);
+  for (const name of ['cancelled_on', 'access_ends_on']) {
+    cancelField(name).value = values[name];
+    cancelField(name).min = period.started_on;
+  }
+  cancelField('cancelled_on').max = today;
+  $('#cancel-title').textContent = `mark ${service.name} cancelled`;
+  $('#cancel-prompt').hidden = !prompt;
+  $('#cancel-prompt-text').textContent = prompt ?? '';
+  $('#cancel-manage').innerHTML = prompt ? promptManageHtml(service) : '';
+  $('#cancel-ends-hint').textContent = period.renews_on
+    ? `the last day you can use it. the service's confirmation screen says; left blank, it's the day before the ${formatDay(period.renews_on, today)} charge.`
+    : "the last day you can use it. the service's confirmation screen says.";
+  markErrors(cancelForm, {});
+  openModal('cancel-modal');
+  cancelField('cancelled_on').focus();
+}
+
+function closeCancel() {
+  if (closeModal('cancel-modal')) cancelling = null;
+}
+
+async function saveCancel(event) {
+  event.preventDefault();
+  if (!cancelling || dialogBusy) return;
+  const { service, period } = cancelling;
+  const today = todayLocal();
+  const values = { cancelled_on: cancelField('cancelled_on').value, access_ends_on: cancelField('access_ends_on').value };
+  const { row, errors } = cancelFromForm(values, { period, today });
+  markErrors(cancelForm, errors);
+  const firstBad = Object.keys(errors).find((k) => k !== 'form');
+  if (firstBad) cancelField(firstBad).focus();
+  if (!row) return;
+
+  await submitDialog('cancel-modal', $('#cancel-save'), 'saving…', async () => {
+    const saved = await db.cancelPeriod(period.id, row);
+    putRow(state.periodsByService, saved);
+    return () => {
+      render();
+      const ends = accessEnd(saved);
+      toast(ends >= today ? `cancelled ${service.name} · active until ${formatDay(ends, today)}` : `cancelled ${service.name}`);
     };
   });
 }
@@ -795,6 +888,12 @@ const ACTIONS = {
   restore: (el) => setArchived(el, false),
   subscribe: openSubscribe,
   'close-sub': closeSubscribe,
+  cancel: (el) => {
+    const service = findService(el.dataset.id);
+    if (service) openCancel(service);
+    else toast('that service is gone. reload the page.', { error: true });
+  },
+  'close-cancel': closeCancel,
   delete: openDelete,
   reload: load,
 };
@@ -809,6 +908,7 @@ $('#del-form').addEventListener('submit', confirmDelete);
 subForm.addEventListener('submit', saveSubscribe);
 subForm.addEventListener('input', onSubscribeInput);
 subForm.addEventListener('change', onSubscribeInput);
+cancelForm.addEventListener('submit', saveCancel);
 $('#del-confirm').addEventListener('input', () => { $('#del-go').disabled = !deleteTyped(); });
 
 window.addEventListener('hashchange', () => {
@@ -821,7 +921,9 @@ window.addEventListener('hashchange', () => {
 
 // Close a dialog on a click that starts and ends on its backdrop, so selecting
 // text in a field and releasing outside the dialog doesn't throw the form away.
-const CLOSERS = { 'svc-modal': closeForm, 'del-modal': closeDelete, 'sub-modal': closeSubscribe };
+const CLOSERS = {
+  'svc-modal': closeForm, 'del-modal': closeDelete, 'sub-modal': closeSubscribe, 'cancel-modal': closeCancel,
+};
 for (const [id, close] of Object.entries(CLOSERS)) {
   const overlay = document.getElementById(id);
   let downOnBackdrop = false;

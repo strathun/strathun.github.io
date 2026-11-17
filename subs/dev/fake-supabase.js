@@ -27,6 +27,7 @@
       update(row) { op = 'update'; payload = row; return b; },
       delete() { op = 'delete'; return b; },
       eq(col, val) { filters.push([col, val]); return b; },
+      is(col, val) { filters.push([col, val]); return b; },
       order() { return b; },
       then(resolve, reject) {
         const go = () => Promise.resolve(run()).then(resolve, reject);
@@ -35,7 +36,7 @@
     };
     const proxy = new Proxy(b, { get: (t, k) => (k in t ? t[k] : () => proxy) });
     for (const k of Object.keys(b)) if (k !== 'then') { const f = b[k]; b[k] = (...a) => { f(...a); return proxy; }; }
-    const match = (r) => filters.every(([c, v]) => r[c] === v);
+    const match = (r) => filters.every(([c, v]) => (v === null ? r[c] == null : r[c] === v));
     function run() {
       fake.calls.push({ table, op, payload, filters });
       const rows = (tables[table] ??= []);

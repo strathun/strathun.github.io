@@ -157,10 +157,8 @@
   .checklist li::marker { color: var(--muted); }
   .checklist li.done { color: var(--muted); }
   .checklist li.done::marker { content: '✓  '; color: var(--accent2); }
-  .checklist .progress, .checklist .later { display: block; font-size: 11px; margin-top: 2px; }
-  .checklist .progress { color: var(--warn); }
+  .checklist .progress { display: block; font-size: 11px; margin-top: 2px; color: var(--warn); }
   .checklist li.done .progress { color: var(--accent2); }
-  .checklist .later { color: var(--muted); font-style: italic; }
   .empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
   .empty, .loading-msg, .load-error {
@@ -241,6 +239,13 @@
   .del-warning, .modal-lead { margin-bottom: 14px; }
   .modal-lead strong { color: var(--text); font-weight: 600; }
   .field-hint:empty { display: none; }
+  .cancel-prompt {
+    margin-bottom: 16px; padding: 10px 12px; border-radius: var(--radius); font-size: 12px;
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+    background: color-mix(in srgb, var(--warn) 8%, transparent);
+  }
+  .cancel-prompt p { color: var(--warn); }
+  .cancel-prompt .btn, .cancel-prompt .manage-path { margin-top: 10px; }
   .del-warning strong { color: var(--text); }
 
   /* ── toast ── */
@@ -431,6 +436,41 @@
       <div class="modal-actions">
         <button class="btn" type="button" data-action="close-sub">cancel</button>
         <button class="btn btn-primary" type="submit" id="sub-save">mark subscribed</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Mark cancelled (SPEC §7.3, §9): sets cancelled_on and access_ends_on ── -->
+<div class="overlay" id="cancel-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cancel-title">
+    <div class="modal-title">
+      <span id="cancel-title">mark cancelled</span>
+      <button class="close-btn" type="button" data-action="close-cancel" aria-label="close">×</button>
+    </div>
+    <form id="cancel-form" novalidate autocomplete="off">
+      <div class="cancel-prompt" id="cancel-prompt" hidden>
+        <p id="cancel-prompt-text"></p>
+        <div id="cancel-manage"></div>
+      </div>
+      <p class="small muted modal-lead">turn off auto-renew on the service's site first, then record it here.</p>
+      <div class="row2">
+        <div class="field">
+          <label for="cancel-date">cancelled on</label>
+          <input id="cancel-date" name="cancelled_on" type="date">
+          <div class="field-error" data-for="cancelled_on"></div>
+        </div>
+        <div class="field">
+          <label for="cancel-ends">access ends</label>
+          <input id="cancel-ends" name="access_ends_on" type="date">
+          <div class="field-error" data-for="access_ends_on"></div>
+        </div>
+      </div>
+      <div class="field-hint" id="cancel-ends-hint"></div>
+      <div class="modal-error" id="cancel-error" role="alert"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-cancel">not now</button>
+        <button class="btn btn-primary" type="submit" id="cancel-save">mark cancelled</button>
       </div>
     </form>
   </div>

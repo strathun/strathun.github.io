@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setPriceOption, subscribeDefaults, subscribeFromForm } from './entry.js';
+import {
+  setPriceOption, subscribeDefaults, subscribeFromForm,
+  renewalPending, cancelDefaults, cancelFromForm,
+} from './entry.js';
 import { svc, period, TODAY } from './fixtures.js';
 
 // ── Also set as current price ───────────────────────────────────────────────
@@ -113,4 +116,75 @@ test('subscribeFromForm: too far back for catch-up is an error', () => {
   const r = subscribeFromForm({ date: '1990-01-01', amount: '1' }, { service: weekly, today: TODAY });
   assert.match(r.errors.date, /too far back/);
   assert.equal(r.plan, null);
+});
+
+// ── Mark cancelled ──────────────────────────────────────────────────────────
+
+const current = period({ id: 'p1', started_on: TODAY, renews_on: '2026-12-16' });
+const backfill = period({ id: 'p2', started_on: '2026-03-01', renews_on: '2026-04-01' });
+
+test('renewalPending: only an open period whose renews_on has come', () => {
+  assert.equal(renewalPending(current, TODAY), false);
+  assert.equal(renewalPending(backfill, TODAY), true);
+  assert.equal(renewalPending(period({ started_on: '2026-10-16', renews_on: TODAY }), TODAY), true);
+  assert.equal(renewalPending({ ...backfill, cancelled_on: '2026-03-01' }, TODAY), false);
+});
+
+test('cancelDefaults: today, access until the day before the next charge', () => {
+  assert.deepEqual(cancelDefaults(current, TODAY), { cancelled_on: TODAY, access_ends_on: '2026-12-15' });
+});
+
+test('cancelDefaults: a backfill with a pending renewal defaults to cancelling on day one', () => {
+  assert.deepEqual(cancelDefaults(backfill, TODAY), { cancelled_on: '2026-03-01', access_ends_on: '2026-03-31' });
+});
+
+test('cancelDefaults: no renews_on → access ends the day it was cancelled', () => {
+  assert.deepEqual(cancelDefaults(period({ started_on: '2026-11-01' }), TODAY), { cancelled_on: TODAY, access_ends_on: TODAY });
+});
+
+test('cancelFromForm: the defaults are accepted (acceptance 8)', () => {
+  assert.deepEqual(cancelFromForm(cancelDefaults(current, TODAY), { period: current, today: TODAY }), {
+    row: { cancelled_on: TODAY, access_ends_on: '2026-12-15' },
+    errors: {},
+  });
+});
+
+test('cancelFromForm: an edited access end is kept, a blank one takes the default', () => {
+  const later = cancelFromForm({ cancelled_on: TODAY, access_ends_on: '2026-12-16' }, { period: current, today: TODAY });
+  assert.equal(later.row.access_ends_on, '2026-12-16');
+  const blank = cancelFromForm({ cancelled_on: TODAY, access_ends_on: '' }, { period: current, today: TODAY });
+  assert.equal(blank.row.access_ends_on, '2026-12-15');
+});
+
+test('cancelFromForm: access can end the day you cancel, not before', () => {
+  const now = cancelFromForm({ cancelled_on: TODAY, access_ends_on: TODAY }, { period: current, today: TODAY });
+  assert.deepEqual(now.errors, {});
+  const before = cancelFromForm({ cancelled_on: TODAY, access_ends_on: '2026-11-15' }, { period: current, today: TODAY });
+  assert.equal(before.errors.access_ends_on, "can't end before you cancelled");
+  assert.equal(before.row, null);
+});
+
+test('cancelFromForm: cancel date is real, not in the future, not before the start', () => {
+  const at = (d) => cancelFromForm({ cancelled_on: d, access_ends_on: '' }, { period: current, today: TODAY }).errors.cancelled_on;
+  assert.equal(at(''), 'pick a date');
+  assert.equal(at('2026-11-31'), 'not a real date');
+  assert.equal(at('2026-11-17'), "can't be in the future");
+  assert.equal(at('2026-11-15'), "can't be before it started (nov 16)");
+});
+
+test('cancelFromForm: refuses a date on or after an unrecorded renewal', () => {
+  const r = cancelFromForm({ cancelled_on: TODAY, access_ends_on: '' }, { period: backfill, today: TODAY });
+  assert.match(r.errors.cancelled_on, /after its apr 1 renewal/);
+  const ok = cancelFromForm({ cancelled_on: '2026-03-31', access_ends_on: '' }, { period: backfill, today: TODAY });
+  assert.deepEqual(ok.row, { cancelled_on: '2026-03-31', access_ends_on: '2026-03-31' });
+});
+
+test('cancelFromForm: a bad access date is reported', () => {
+  const r = cancelFromForm({ cancelled_on: TODAY, access_ends_on: '2026-02-30' }, { period: current, today: TODAY });
+  assert.equal(r.errors.access_ends_on, 'not a real date');
+});
+
+test('cancelFromForm: an already cancelled period is refused', () => {
+  const done = { ...current, cancelled_on: TODAY, access_ends_on: '2026-12-15' };
+  assert.match(cancelFromForm({ cancelled_on: TODAY, access_ends_on: '' }, { period: done, today: TODAY }).errors.form, /already cancelled/);
 });

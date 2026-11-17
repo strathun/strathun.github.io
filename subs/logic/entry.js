@@ -2,10 +2,10 @@
 // each takes the strings a form holds and returns what to write, or errors keyed
 // by field ('form' for a problem with no single field).
 
-import { parseYmd } from './dates.js';
+import { formatDay, parseYmd } from './dates.js';
 import { parseCents, centsToInput } from './services.js';
 import { openPeriod } from './status.js';
-import { planSubscribe, planCatchUp } from './periods.js';
+import { planSubscribe, planCancel, planCatchUp } from './periods.js';
 
 /** A date input: required, a real calendar date, and not after `today`. */
 function dateField(input, today) {
@@ -70,4 +70,59 @@ export function subscribeFromForm(values, { service, periods = [], today }) {
   if (Object.keys(errors).length) return { plan: null, setPrice: false, missed: [], errors };
   const setPrice = setPriceOption(service, amount.value).show && !!values.set_price;
   return { plan, setPrice, missed, errors };
+}
+
+// ── Mark cancelled ──────────────────────────────────────────────────────────
+
+/**
+ * True when the period's renewal date has passed but catch-up hasn't recorded it:
+ * a backfill entered this session. It was cancelled before that renewal, or the
+ * next load will record the renewals.
+ */
+export function renewalPending(period, today) {
+  return period.cancelled_on == null && period.renews_on != null && period.renews_on <= today;
+}
+
+/**
+ * Form defaults (SPEC §7.3): cancelled today, access to the day before the next
+ * charge. For a backfill with a renewal pending, cancelled on the start day instead
+ * (the rotation habit), since cancelling today would skip the renewals in between.
+ */
+export function cancelDefaults(period, today) {
+  const date = renewalPending(period, today) ? period.started_on : today;
+  return planCancel(period, date);
+}
+
+/**
+ * Mark cancelled form → { row: { cancelled_on, access_ends_on }, errors }.
+ * A blank access end takes the default (renews_on − 1 day).
+ */
+export function cancelFromForm(values, { period, today }) {
+  const errors = {};
+  if (period.cancelled_on != null) errors.form = 'this period is already cancelled.';
+
+  const date = dateField(values.cancelled_on, today);
+  if (date.error) errors.cancelled_on = date.error;
+  else if (date.value < period.started_on) {
+    errors.cancelled_on = `can't be before it started (${formatDay(period.started_on, today)})`;
+  } else if (period.renews_on && date.value >= period.renews_on) {
+    errors.cancelled_on = `that's after its ${formatDay(period.renews_on, today)} renewal. pick an earlier date, or reload so the renewal is recorded first`;
+  }
+
+  let accessEndsOn = null;
+  const ends = String(values.access_ends_on ?? '').trim();
+  if (ends) {
+    try {
+      parseYmd(ends);
+      accessEndsOn = ends;
+    } catch {
+      errors.access_ends_on = 'not a real date';
+    }
+  }
+  if (accessEndsOn && !errors.cancelled_on && accessEndsOn < date.value) {
+    errors.access_ends_on = "can't end before you cancelled";
+  }
+
+  if (Object.keys(errors).length) return { row: null, errors };
+  return { row: planCancel(period, date.value, accessEndsOn), errors };
 }
