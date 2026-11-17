@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { serviceStatus, latestPeriod, accessEnd, groupByService } from './status.js';
+import { serviceStatus, latestPeriod, accessEnd, groupByService, openPeriod } from './status.js';
 import { period, TODAY } from './fixtures.js';
 
 test('no periods → inactive', () => {
@@ -66,4 +66,12 @@ test('groupByService buckets rows by service_id', () => {
   assert.deepEqual(map.get('a').map((r) => r.n), [1, 3]);
   assert.deepEqual(map.get('b').map((r) => r.n), [2]);
   assert.equal(map.get('c'), undefined);
+});
+
+test('openPeriod finds the uncancelled period, even when it is not the latest', () => {
+  const open = period({ started_on: '2026-03-01', renews_on: '2026-04-01' });
+  const later = period({ started_on: '2026-11-01', renews_on: '2026-12-01', cancelled_on: '2026-11-01', access_ends_on: '2026-11-30' });
+  assert.equal(openPeriod([later, open]), open);
+  assert.equal(openPeriod([later]), null);
+  assert.equal(openPeriod([]), null);
 });

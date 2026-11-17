@@ -9,19 +9,29 @@
 //   #/s/{id}  service detail
 
 import { todayLocal, formatDay } from './logic/dates.js';
-import { groupByService, serviceStatus } from './logic/status.js';
+import { groupByService, serviceStatus, openPeriod, accessEnd } from './logic/status.js';
 import {
-  CATEGORIES, INTERVALS, formatPrice, formValues, serviceFromForm,
-  findNameConflict, groupServices, serviceBadges, canArchive, isWebUrl, setupProgress,
+  CATEGORIES, INTERVALS, INTERVAL_SHORT, formatCents, formatPrice, formValues, serviceFromForm,
+  findNameConflict, groupServices, serviceBadges, canArchive, isWebUrl, setupProgress, parseCents,
 } from './logic/services.js';
+import { periodHistory, chargeTotal } from './logic/history.js';
+import {
+  setPriceOption, subscribeDefaults, subscribeFromForm,
+  renewalPending, cancelDefaults, cancelFromForm,
+  chargeDefaults, chargeSetPriceOption, chargeFromForm,
+} from './logic/entry.js';
 import { starterRows } from './logic/starter.js';
+import { planCatchUpAll } from './logic/periods.js';
 import * as db from './db.js';
 
 const state = {
   loaded: false,
   services: [],
   periodsByService: new Map(),
+  chargesByService: new Map(),
   showArchived: false,
+  /** Why the last catch-up failed, shown until a reload succeeds. */
+  catchUpError: null,
 };
 
 /** The service open in the form, or null when adding a new one. */
@@ -75,6 +85,8 @@ function setChecklistDismissed(dismissed) {
 }
 
 const findService = (id) => state.services.find((s) => s.id === id) ?? null;
+const periodsOf = (id) => state.periodsByService.get(id) ?? [];
+const chargesOf = (id) => state.chargesByService.get(id) ?? [];
 const detailHref = (id) => `#/s/${encodeURIComponent(id)}`;
 
 /** Local calendar date of a timestamptz such as archived_at. */
@@ -94,10 +106,41 @@ async function load() {
       </div>`;
     return;
   }
+  data = await catchUp(data);
   state.services = data.services;
   state.periodsByService = groupByService(data.periods);
+  state.chargesByService = groupByService(data.charges);
   state.loaded = true;
   render();
+}
+
+/**
+ * Records renewals that came due since the last load (SPEC §7.3), then reloads so
+ * the page shows exactly what's stored. On failure, keeps the rows it has and
+ * shows why; the next load tries again and can't double-charge (acceptance 9).
+ */
+async function catchUp(data) {
+  state.catchUpError = null;
+  let inserted;
+  try {
+    const work = planCatchUpAll({ services: data.services, periods: data.periods, today: todayLocal() });
+    if (!work.length) return data;
+    inserted = await db.recordRenewals(work);
+  } catch (err) {
+    state.catchUpError = err.message;
+    return data;
+  }
+  // Count what was stored, not what was planned: another tab may have stored some first.
+  if (inserted.length) {
+    const names = [...new Set(inserted.map((c) => data.services.find((s) => s.id === c.service_id)?.name ?? 'a deleted service'))];
+    toast(`recorded ${inserted.length} renewal${inserted.length === 1 ? '' : 's'}: ${names.join(', ')}`);
+  }
+  try {
+    return await db.loadAll();
+  } catch (err) {
+    state.catchUpError = `renewals were recorded, but ${err.message}`;
+    return data;
+  }
 }
 
 function upsertLocal(row) {
@@ -106,9 +149,21 @@ function upsertLocal(row) {
   else state.services[i] = row;
 }
 
+/** Adds or replaces a period or charge row in its service's list. */
+function putRow(map, row) {
+  const list = map.get(row.service_id);
+  if (!list) map.set(row.service_id, [row]);
+  else {
+    const i = list.findIndex((r) => r.id === row.id);
+    if (i === -1) list.push(row);
+    else list[i] = row;
+  }
+}
+
 function removeLocal(id) {
   state.services = state.services.filter((s) => s.id !== id);
   state.periodsByService.delete(id);
+  state.chargesByService.delete(id);
 }
 
 // ── routing ─────────────────────────────────────────────────────────────────
@@ -128,6 +183,13 @@ function render() {
   const route = currentRoute();
   if (route.view === 'detail') renderDetail(route.id);
   else renderDashboard();
+  if (state.catchUpError) {
+    $('#view').insertAdjacentHTML('afterbegin', `
+      <div class="banner-error" role="alert">
+        <span>${esc(state.catchUpError)}</span>
+        <button class="btn" data-action="reload">try again</button>
+      </div>`);
+  }
 }
 
 // ── dashboard (SPEC §8.1) ───────────────────────────────────────────────────
@@ -213,7 +275,6 @@ function renderDashboard() {
 function checklistHtml() {
   const { priced, total } = setupProgress(state.services);
   const pricesDone = total > 0 && priced === total;
-  const later = '<span class="later">arrives in step 4</span>';
   return `
     <section class="checklist" aria-labelledby="checklist-title">
       <div class="checklist-head">
@@ -229,10 +290,12 @@ function checklistHtml() {
           for each service you pay for now, mark subscribed on the date of its most recent charge
           (spotify, uzzu, nintendo, claude, google one, paramount+, amazon prime, icloud+, netflix, ps plus).
           annual keepers (nintendo, google one, prime) may go back to 2025; that's what makes this year's spend right.
-          ${later}
         </li>
-        <li>for rotators you've already cancelled (or cancel now), mark cancelled. ${later}</li>
-        <li>optional: backfill earlier rotations this year, so the year view and averages cover the whole year. ${later}</li>
+        <li>for rotators you've already cancelled (or cancel now), mark cancelled.</li>
+        <li>
+          optional: backfill earlier rotations this year, so the year view and averages cover the whole year:
+          mark subscribed on the day it started, then mark cancelled straight away.
+        </li>
       </ol>
     </section>`;
 }
@@ -332,7 +395,7 @@ function renderDetail(id) {
   }
 
   const today = todayLocal();
-  const status = serviceStatus(state.periodsByService.get(service.id) ?? [], today);
+  const status = serviceStatus(periodsOf(service.id), today);
   const badges = badgesHtml(service, today);
   const lead = service.cancel_lead_days;
 
@@ -342,11 +405,22 @@ function renderDetail(id) {
       <button class="btn" data-action="restore" data-id="${esc(service.id)}">restore</button>
       <button class="btn btn-danger" data-action="delete" data-id="${esc(service.id)}">delete permanently…</button>`;
   } else {
+    // At most one uncancelled period (SPEC §6): while it exists, Mark subscribed is off (acceptance 7).
+    const open = openPeriod(periodsOf(service.id));
     const allowed = canArchive(status.status);
+    const id = esc(service.id);
+    const hint = !open
+      ? ''
+      : allowed
+        ? 'a period is still renewing. mark it cancelled before subscribing again.'
+        : "still renewing. mark it cancelled before subscribing again or archiving, so its charges can't continue unseen.";
+    const off = 'disabled aria-describedby="actions-hint"';
     actions = `
-      <button class="btn" data-action="edit" data-id="${esc(service.id)}">edit</button>
-      <button class="btn" data-action="archive" data-id="${esc(service.id)}" ${allowed ? '' : 'disabled aria-describedby="archive-hint"'}>archive</button>
-      ${allowed ? '' : `<p class="muted small" id="archive-hint">still renewing. mark it cancelled before archiving, so its charges can't continue unseen.</p>`}`;
+      ${open ? `<button class="btn btn-primary" data-action="cancel" data-id="${id}">mark cancelled</button>` : ''}
+      <button class="btn ${open ? '' : 'btn-primary'}" data-action="subscribe" data-id="${id}" ${open ? off : ''}>mark subscribed</button>
+      <button class="btn" data-action="edit" data-id="${id}">edit</button>
+      <button class="btn" data-action="archive" data-id="${id}" ${allowed ? '' : off}>archive</button>
+      ${hint ? `<p class="muted small" id="actions-hint">${hint}</p>` : ''}`;
   }
 
   $('#view').innerHTML = `
@@ -372,7 +446,81 @@ function renderDetail(id) {
       </dl>
 
       <div class="detail-actions">${actions}</div>
-    </article>`;
+    </article>
+    ${historyHtml(service, today)}`;
+}
+
+// ── period history and charges (SPEC §8.3) ──────────────────────────────────
+
+/** 'nov 1 → renewing' or 'mar 1 → mar 31', the way the history and dialogs name a period. */
+function periodLabel({ period, open, accessEndsOn }, today) {
+  const start = formatDay(period.started_on, today);
+  return open ? `${start} → renewing` : `${start} → ${formatDay(accessEndsOn, today)}`;
+}
+
+function periodHeadHtml(entry, today) {
+  const { period, open, accessEndsOn } = entry;
+  const start = esc(formatDay(period.started_on, today));
+  const del = `<button class="link-btn period-delete" data-action="delete-period" data-id="${esc(period.id)}" data-service="${esc(period.service_id)}" aria-label="delete the ${esc(periodLabel(entry, today))} period">delete…</button>`;
+  if (open) {
+    const next = period.renews_on
+      ? `<span class="period-meta">next charge ${esc(formatDay(period.renews_on, today))}</span>`
+      : '';
+    return `<span class="period-when"><span class="period-dates">${start} → <span class="status-renewing">renewing</span></span> ${next}</span> ${del}`;
+  }
+  return `<span class="period-when">
+      <span class="period-dates">${start} → ${esc(formatDay(accessEndsOn, today))}</span>
+      <span class="period-meta">cancelled ${esc(formatDay(period.cancelled_on, today))}</span>
+    </span> ${del}`;
+}
+
+function chargeHtml(charge, today, { editable = false } = {}) {
+  const amount = charge.amount_cents == null
+    ? `<span class="charge-amount unknown">amount unknown</span>`
+    : `<span class="charge-amount">${esc(formatCents(charge.amount_cents))}</span>`;
+  const interval = INTERVAL_SHORT[charge.billing_interval] ?? charge.billing_interval;
+  const auto = charge.source === 'auto'
+    ? `<span class="badge badge-muted" title="recorded automatically on the renewal date">auto</span>`
+    : '';
+  const edit = editable
+    ? ` <button class="link-btn charge-edit" data-action="edit-charge" data-id="${esc(charge.id)}" data-service="${esc(charge.service_id)}" aria-label="edit the ${esc(formatDay(charge.charged_on, today))} charge">edit</button>`
+    : '';
+  return `
+    <li class="charge">
+      <span class="charge-date">${esc(formatDay(charge.charged_on, today))}</span>
+      <span class="charge-what">${amount}<span class="muted"> / ${esc(interval)}</span> ${auto}</span>${edit}
+    </li>`;
+}
+
+function chargeListHtml(charges, today) {
+  if (!charges.length) return `<p class="muted small charge-none">no charges</p>`;
+  return `<ul class="charge-list">${charges.map((c) => chargeHtml(c, today, { editable: true })).join('')}</ul>`;
+}
+
+function historyHtml(service, today) {
+  const { periods, loose } = periodHistory(periodsOf(service.id), chargesOf(service.id));
+  let body;
+  if (!periods.length && !loose.length) {
+    body = `<p class="muted small">no periods yet.</p>`;
+  } else {
+    body = `<ol class="period-list">${periods.map((entry) => `
+      <li class="period ${entry.open ? 'is-open' : ''}">
+        <div class="period-head">${periodHeadHtml(entry, today)}</div>
+        ${chargeListHtml(entry.charges, today)}
+      </li>`).join('')}</ol>`;
+    if (loose.length) {
+      body += `
+        <div class="period loose">
+          <div class="period-head"><span class="period-dates">charges in no period</span></div>
+          ${chargeListHtml(loose, today)}
+        </div>`;
+    }
+  }
+  return `
+    <section class="history" aria-labelledby="history-title">
+      <h2 class="group-title" id="history-title">periods and charges</h2>
+      ${body}
+    </section>`;
 }
 
 // ── add / edit form (SPEC §8.4) ─────────────────────────────────────────────
@@ -418,15 +566,20 @@ function readForm() {
   return values;
 }
 
-function showErrors(errors) {
-  for (const el of form.querySelectorAll('.field-error')) {
+/** Shows `errors` (field → message, 'form' for the whole form) in a dialog's form. */
+function markErrors(formEl, errors) {
+  for (const el of formEl.querySelectorAll('.field-error')) {
     el.textContent = errors[el.dataset.for] ?? '';
   }
-  for (const el of form.querySelectorAll('input, select, textarea')) {
+  for (const el of formEl.querySelectorAll('input, select, textarea')) {
     if (errors[el.name]) el.setAttribute('aria-invalid', 'true');
     else el.removeAttribute('aria-invalid');
   }
-  $('#svc-error').textContent = '';
+  formEl.querySelector('.modal-error').textContent = errors.form ?? '';
+}
+
+function showErrors(errors) {
+  markErrors(form, errors);
 }
 
 async function saveForm(event) {
@@ -542,6 +695,381 @@ async function confirmDelete(event) {
   }
 }
 
+// ── dialogs for periods and charges ─────────────────────────────────────────
+
+/**
+ * Runs a dialog's save. The dialog stays open (dialogBusy) until the request ends,
+ * so a failure is shown inside it. `fn` returns what to do once it has closed.
+ */
+async function submitDialog(modalId, button, busyLabel, fn) {
+  const label = button.textContent;
+  const errorEl = $(`#${modalId} .modal-error`);
+  button.disabled = true;
+  button.textContent = busyLabel;
+  errorEl.textContent = '';
+  dialogBusy = true;
+  let after;
+  try {
+    after = await fn();
+  } catch (err) {
+    errorEl.textContent = err.message;
+    return;
+  } finally {
+    dialogBusy = false;
+    button.disabled = false;
+    button.textContent = label;
+  }
+  CLOSERS[modalId]();
+  after?.();
+}
+
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
+}
+
+/** False while a request is in flight: the dialog stays open to show how it ends. */
+function closeModal(id) {
+  if (dialogBusy) return false;
+  document.getElementById(id).classList.remove('open');
+  return true;
+}
+
+// ── mark subscribed (SPEC §7.3) ─────────────────────────────────────────────
+
+const subForm = $('#sub-form');
+const subField = (name) => subForm.elements.namedItem(name);
+/** The service in the Mark subscribed dialog. */
+let subscribing = null;
+/** Once the user ticks or unticks "also set as current price", stop changing it for them. */
+let setPriceTouched = false;
+
+function openSubscribe(button) {
+  const service = findService(button.dataset.id);
+  if (!service) {
+    toast('that service is gone. reload the page.', { error: true });
+    return;
+  }
+  subscribing = service;
+  setPriceTouched = false;
+  const today = todayLocal();
+  const values = subscribeDefaults(service, today);
+  subField('date').value = values.date;
+  subField('date').max = today;
+  subField('amount').value = values.amount;
+  subField('set_price').checked = values.set_price;
+  $('#sub-title').textContent = `mark ${service.name} subscribed`;
+  $('#sub-interval').textContent = service.billing_interval;
+  markErrors(subForm, {});
+  updateSubscribeHints();
+  openModal('sub-modal');
+  subField('date').focus();
+}
+
+function closeSubscribe() {
+  if (closeModal('sub-modal')) subscribing = null;
+}
+
+function readSubscribe() {
+  return { date: subField('date').value, amount: subField('amount').value, set_price: subField('set_price').checked };
+}
+
+function renewalHint({ period }, missed, today) {
+  const renews = formatDay(period.renews_on, today);
+  if (!missed.length) return `renews ${renews}.`;
+  const n = missed.length;
+  const span = n === 1 ? renews : `${renews} to ${formatDay(missed[n - 1], today)}`;
+  return `${n} renewal${n === 1 ? '' : 's'} since (${span}). the app records ${n === 1 ? 'it' : 'them'} the next time it loads, unless you mark this period cancelled first.`;
+}
+
+/** Keeps the price option and the renewal hint in step with what's typed. */
+function updateSubscribeHints() {
+  const service = subscribing;
+  if (!service) return;
+  const today = todayLocal();
+  const values = readSubscribe();
+  const amount = parseCents(values.amount);
+  const option = setPriceOption(service, amount.error ? null : amount.value);
+  $('#sub-setprice').hidden = !option.show;
+  if (!setPriceTouched) subField('set_price').checked = option.checked;
+  $('#sub-price-now').textContent = service.price_cents == null ? 'unknown' : formatPrice(service);
+
+  const { plan, missed } = subscribeFromForm(values, { service, periods: periodsOf(service.id), today });
+  $('#sub-hint').textContent = plan ? renewalHint(plan, missed, today) : '';
+}
+
+function onSubscribeInput(event) {
+  if (event.target.name === 'set_price') setPriceTouched = true;
+  updateSubscribeHints();
+}
+
+async function saveSubscribe(event) {
+  event.preventDefault();
+  const service = subscribing;
+  if (!service || dialogBusy) return;
+  const { plan, setPrice, errors } = subscribeFromForm(readSubscribe(), {
+    service, periods: periodsOf(service.id), today: todayLocal(),
+  });
+  markErrors(subForm, errors);
+  const firstBad = Object.keys(errors).find((k) => k !== 'form');
+  if (firstBad) subField(firstBad).focus();
+  if (!plan) return;
+
+  await submitDialog('sub-modal', $('#sub-save'), 'saving…', async () => {
+    const saved = await db.markSubscribed(plan, setPrice);
+    putRow(state.periodsByService, saved.period);
+    putRow(state.chargesByService, saved.charge);
+    upsertLocal(saved.service);
+    return () => {
+      render();
+      toast(`marked ${service.name} subscribed`);
+      // SPEC §9 rotate-in step 3: prompt to cancel auto-renew straight away.
+      const prompt = cancelPrompt(service, saved.period, todayLocal());
+      if (prompt) openCancel(findService(service.id) ?? service, { prompt });
+    };
+  });
+}
+
+// ── mark cancelled (SPEC §7.3) ──────────────────────────────────────────────
+
+const cancelForm = $('#cancel-form');
+const cancelField = (name) => cancelForm.elements.namedItem(name);
+/** { service, period } in the Mark cancelled dialog. */
+let cancelling = null;
+
+/**
+ * What to ask right after Mark subscribed, or null: a backfill with a pending
+ * renewal (did it end back then?), or any rotator (cancel on day one, SPEC §9).
+ */
+function cancelPrompt(service, period, today) {
+  if (renewalPending(period, today)) {
+    return `did this period end? if you cancelled back then, record it now. otherwise the next load adds its renewals since ${formatDay(period.renews_on, today)}.`;
+  }
+  if (service.role === 'rotator') {
+    return 'cancel auto-renew now? rotators get cancelled on day one: access runs to the end of the paid period.';
+  }
+  return null;
+}
+
+function promptManageHtml(service) {
+  if (isWebUrl(service.manage_url)) {
+    return `<a class="btn" href="${esc(service.manage_url)}" target="_blank" rel="noopener noreferrer">open manage page ↗</a>`;
+  }
+  if (service.manage_path) {
+    return `<div class="manage-path"><span class="field-label">manage path</span>${esc(service.manage_path)}</div>`;
+  }
+  return '';
+}
+
+function openCancel(service, { prompt = null } = {}) {
+  const period = openPeriod(periodsOf(service.id));
+  if (!period) {
+    toast('nothing to cancel: no period is renewing.', { error: true });
+    return;
+  }
+  cancelling = { service, period };
+  const today = todayLocal();
+  const values = cancelDefaults(period, today);
+  for (const name of ['cancelled_on', 'access_ends_on']) {
+    cancelField(name).value = values[name];
+    cancelField(name).min = period.started_on;
+  }
+  cancelField('cancelled_on').max = today;
+  $('#cancel-title').textContent = `mark ${service.name} cancelled`;
+  $('#cancel-prompt').hidden = !prompt;
+  $('#cancel-prompt-text').textContent = prompt ?? '';
+  $('#cancel-manage').innerHTML = prompt ? promptManageHtml(service) : '';
+  $('#cancel-ends-hint').textContent = period.renews_on
+    ? `the last day you can use it. the service's confirmation screen says; left blank, it's the day before the ${formatDay(period.renews_on, today)} charge.`
+    : "the last day you can use it. the service's confirmation screen says.";
+  markErrors(cancelForm, {});
+  openModal('cancel-modal');
+  cancelField('cancelled_on').focus();
+}
+
+function closeCancel() {
+  if (closeModal('cancel-modal')) cancelling = null;
+}
+
+async function saveCancel(event) {
+  event.preventDefault();
+  if (!cancelling || dialogBusy) return;
+  const { service, period } = cancelling;
+  const today = todayLocal();
+  const values = { cancelled_on: cancelField('cancelled_on').value, access_ends_on: cancelField('access_ends_on').value };
+  const { row, errors } = cancelFromForm(values, { period, today });
+  markErrors(cancelForm, errors);
+  const firstBad = Object.keys(errors).find((k) => k !== 'form');
+  if (firstBad) cancelField(firstBad).focus();
+  if (!row) return;
+
+  await submitDialog('cancel-modal', $('#cancel-save'), 'saving…', async () => {
+    const saved = await db.cancelPeriod(period.id, row);
+    putRow(state.periodsByService, saved);
+    return () => {
+      render();
+      const ends = accessEnd(saved);
+      toast(ends >= today ? `cancelled ${service.name} · active until ${formatDay(ends, today)}` : `cancelled ${service.name}`);
+    };
+  });
+}
+
+// ── edit charge (SPEC §8.3, §9 keeper renewal) ──────────────────────────────
+
+const chgForm = $('#chg-form');
+const chgField = (name) => chgForm.elements.namedItem(name);
+/** { service, charge } in the Edit charge dialog. */
+let editingCharge = null;
+let chgSetPriceTouched = false;
+
+function openEditCharge(button) {
+  const service = findService(button.dataset.service);
+  const charge = chargesOf(button.dataset.service).find((c) => c.id === button.dataset.id);
+  if (!service || !charge) {
+    toast('that charge is gone. reload the page.', { error: true });
+    return;
+  }
+  editingCharge = { service, charge };
+  chgSetPriceTouched = false;
+  const today = todayLocal();
+  const values = chargeDefaults(charge);
+  chgField('charged_on').value = values.charged_on;
+  chgField('charged_on').max = today;
+  chgField('amount').value = values.amount;
+  chgField('set_price').checked = values.set_price;
+  $('#chg-title').textContent = `${service.name} charge, ${formatDay(charge.charged_on, today)}`;
+  $('#chg-lead').textContent = charge.source === 'auto'
+    ? 'recorded automatically on the renewal date, at the price on file. make it match your statement.'
+    : 'make it match your statement.';
+  markErrors(chgForm, {});
+  updateChargeHints();
+  openModal('chg-modal');
+  chgField('amount').focus();
+}
+
+function closeEditCharge() {
+  if (closeModal('chg-modal')) editingCharge = null;
+}
+
+function readCharge() {
+  return { charged_on: chgField('charged_on').value, amount: chgField('amount').value, set_price: chgField('set_price').checked };
+}
+
+function updateChargeHints() {
+  if (!editingCharge) return;
+  const { service, charge } = editingCharge;
+  const amount = parseCents(chgField('amount').value);
+  const option = chargeSetPriceOption(charge, service, amount.error ? null : amount.value);
+  $('#chg-setprice').hidden = !option.show;
+  if (!chgSetPriceTouched) chgField('set_price').checked = option.checked;
+  $('#chg-price-now').textContent = service.price_cents == null ? 'unknown' : formatPrice(service);
+}
+
+function onChargeInput(event) {
+  if (event.target.name === 'set_price') chgSetPriceTouched = true;
+  updateChargeHints();
+}
+
+/**
+ * Saves the price first, then the charge. They aren't one transaction (SPEC §6
+ * names only Mark subscribed and Delete period), so the order keeps a retry clean:
+ * if the charge fails, saving again finds the price already set and only retries
+ * the charge. A new price with an old charge amount is harmless meanwhile.
+ */
+async function saveCharge(event) {
+  event.preventDefault();
+  if (!editingCharge || dialogBusy) return;
+  const { service, charge } = editingCharge;
+  const { row, price, errors } = chargeFromForm(readCharge(), {
+    charge, service, siblings: chargesOf(service.id), today: todayLocal(),
+  });
+  markErrors(chgForm, errors);
+  const firstBad = Object.keys(errors).find((k) => k !== 'form');
+  if (firstBad) {
+    chgField(firstBad).focus();
+    return;
+  }
+  if (!row && !price) {
+    closeEditCharge();
+    return;
+  }
+
+  await submitDialog('chg-modal', $('#chg-save'), 'saving…', async () => {
+    if (price) {
+      upsertLocal(await db.updateService(service.id, price, 'update the price'));
+      editingCharge.service = findService(service.id);
+    }
+    if (row) {
+      try {
+        const saved = await db.updateCharge(charge.id, row);
+        putRow(state.chargesByService, saved);
+      } catch (err) {
+        if (price) {
+          render(); // show the new price behind the dialog
+          updateChargeHints(); // the price is saved: a retry only needs the charge
+          err.message = `price updated, but ${err.message}`;
+        }
+        throw err;
+      }
+    }
+    return () => {
+      render();
+      toast(price ? `saved the charge and set ${service.name}'s price` : 'saved the charge');
+    };
+  });
+}
+
+// ── delete period (SPEC §8.3) ───────────────────────────────────────────────
+
+/** { service, entry } in the Delete period dialog; entry is a periodHistory() entry. */
+let deletingPeriod = null;
+
+function totalText(charges) {
+  const { cents, unknown } = chargeTotal(charges);
+  const known = formatCents(cents);
+  return unknown ? `${known} plus ${unknown} unknown` : known;
+}
+
+function openDeletePeriod(button) {
+  const service = findService(button.dataset.service);
+  const { periods } = periodHistory(periodsOf(button.dataset.service), chargesOf(button.dataset.service));
+  const entry = periods.find((e) => e.period.id === button.dataset.id);
+  if (!service || !entry) {
+    toast('that period is gone. reload the page.', { error: true });
+    return;
+  }
+  deletingPeriod = { service, entry };
+  const today = todayLocal();
+  const n = entry.charges.length;
+  $('#delp-title').textContent = `delete ${service.name} period`;
+  $('#delp-period').textContent = periodLabel(entry, today);
+  $('#delp-count').textContent = n ? `and its ${n} charge${n === 1 ? '' : 's'} (${totalText(entry.charges)})` : '(it has no charges)';
+  $('#delp-charges').innerHTML = entry.charges.map((c) => chargeHtml(c, today)).join('');
+  $('#delp-error').textContent = '';
+  openModal('delp-modal');
+  $('#delp-go').focus();
+}
+
+function closeDeletePeriod() {
+  if (closeModal('delp-modal')) deletingPeriod = null;
+}
+
+async function confirmDeletePeriod(event) {
+  event.preventDefault();
+  if (!deletingPeriod || dialogBusy) return;
+  const { service, entry } = deletingPeriod;
+  await submitDialog('delp-modal', $('#delp-go'), 'deleting…', async () => {
+    const { period, charge_ids: gone } = await db.deletePeriod(entry.period.id);
+    const removed = new Set(gone);
+    state.periodsByService.set(service.id, periodsOf(service.id).filter((p) => p.id !== period.id));
+    state.chargesByService.set(service.id, chargesOf(service.id).filter((c) => !removed.has(c.id) && c.period_id !== period.id));
+    return () => {
+      render();
+      const n = gone.length;
+      toast(n ? `deleted the period and its ${n} charge${n === 1 ? '' : 's'}` : 'deleted the period');
+    };
+  });
+}
+
 // ── events ──────────────────────────────────────────────────────────────────
 
 const ACTIONS = {
@@ -568,6 +1096,18 @@ const ACTIONS = {
   },
   archive: (el) => setArchived(el, true),
   restore: (el) => setArchived(el, false),
+  subscribe: openSubscribe,
+  'close-sub': closeSubscribe,
+  cancel: (el) => {
+    const service = findService(el.dataset.id);
+    if (service) openCancel(service);
+    else toast('that service is gone. reload the page.', { error: true });
+  },
+  'close-cancel': closeCancel,
+  'delete-period': openDeletePeriod,
+  'close-delp': closeDeletePeriod,
+  'edit-charge': openEditCharge,
+  'close-chg': closeEditCharge,
   delete: openDelete,
   reload: load,
 };
@@ -579,20 +1119,30 @@ document.addEventListener('click', (event) => {
 
 form.addEventListener('submit', saveForm);
 $('#del-form').addEventListener('submit', confirmDelete);
+subForm.addEventListener('submit', saveSubscribe);
+subForm.addEventListener('input', onSubscribeInput);
+subForm.addEventListener('change', onSubscribeInput);
+cancelForm.addEventListener('submit', saveCancel);
+$('#delp-form').addEventListener('submit', confirmDeletePeriod);
+chgForm.addEventListener('submit', saveCharge);
+chgForm.addEventListener('input', onChargeInput);
+chgForm.addEventListener('change', onChargeInput);
 $('#del-confirm').addEventListener('input', () => { $('#del-go').disabled = !deleteTyped(); });
 
 window.addEventListener('hashchange', () => {
   // A dialog belongs to the view it was opened from. While its request is in
   // flight it stays open (dialogBusy) and closes itself when the request ends.
-  closeForm();
-  closeDelete();
+  for (const close of Object.values(CLOSERS)) close();
   render();
   window.scrollTo(0, 0);
 });
 
 // Close a dialog on a click that starts and ends on its backdrop, so selecting
 // text in a field and releasing outside the dialog doesn't throw the form away.
-const CLOSERS = { 'svc-modal': closeForm, 'del-modal': closeDelete };
+const CLOSERS = {
+  'svc-modal': closeForm, 'del-modal': closeDelete, 'sub-modal': closeSubscribe, 'cancel-modal': closeCancel,
+  'delp-modal': closeDeletePeriod, 'chg-modal': closeEditCharge,
+};
 for (const [id, close] of Object.entries(CLOSERS)) {
   const overlay = document.getElementById(id);
   let downOnBackdrop = false;

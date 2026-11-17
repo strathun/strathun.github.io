@@ -1,6 +1,7 @@
--- RLS acceptance test for /subs/ (SPEC.md §10 criterion 1).
--- Run in Supabase → SQL Editor AFTER schema.sql. Everything runs inside a
--- transaction that is rolled back, so no data is left behind.
+-- RLS acceptance test for /subs/ (SPEC.md §10 criteria 1, 17, 18).
+-- Run in Supabase → SQL Editor AFTER schema.sql and migrations/*.sql. Everything
+-- runs inside a transaction that is rolled back, so no data is left behind.
+-- To run it on a local Postgres instead, see subs/dev/README.md (sql-check.sh).
 --
 -- Pass: the last result is "ALL RLS CHECKS PASSED".
 -- Fail: the run stops with an error naming the check that failed.
@@ -84,6 +85,18 @@ begin
     raise exception 'B attached a charge to A''s service';
   exception when foreign_key_violation then null;
   end;
+
+  -- The migration 002 functions run as the caller (security invoker): A's rows stay invisible.
+  begin
+    perform mark_subscribed('11111111-0000-0000-0000-000000000001', '2026-11-02', '2026-12-02', 'monthly', 100, true);
+    raise exception 'B marked A''s service subscribed';
+  exception when no_data_found then null;
+  end;
+  begin
+    perform delete_period('22222222-0000-0000-0000-000000000001');
+    raise exception 'B deleted A''s period';
+  exception when no_data_found then null;
+  end;
 end $$;
 
 -- ── As anon (signed out): no reads, no writes ───────────────────────────────
@@ -102,6 +115,16 @@ begin
     raise exception 'anon inserted a service';
   exception when insufficient_privilege then null;
   end;
+  begin
+    perform mark_subscribed('11111111-0000-0000-0000-000000000001', '2026-11-02', '2026-12-02', 'monthly', 100, false);
+    raise exception 'anon ran mark_subscribed';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform delete_period('22222222-0000-0000-0000-000000000001');
+    raise exception 'anon ran delete_period';
+  exception when insufficient_privilege then null;
+  end;
 end $$;
 
 -- ── Back to A: data constraints ─────────────────────────────────────────────
@@ -111,6 +134,8 @@ set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-0000-0000-000000000001","r
 do $$
 begin
   assert (select name from services) = 'RLS Test Service', 'B''s update leaked through';
+  assert (select count(*) from periods) = 1 and (select count(*) from charges) = 1,
+         'B''s delete_period leaked through';
 
   -- Second uncancelled period for the same service (acceptance 7).
   begin
@@ -147,6 +172,102 @@ begin
   delete from services where id = '11111111-0000-0000-0000-000000000001';
   assert (select count(*) from charges) = 0,         'charges not cascaded';
   assert (select count(*) from watchlist_items) = 0, 'watchlist_items not cascaded';
+end $$;
+
+-- ── Still A: transactional writes (migration 002, acceptance 17 and 18) ─────
+do $$
+declare
+  r     jsonb;
+  svc   uuid := '33333333-0000-0000-0000-000000000001';
+  other uuid := '33333333-0000-0000-0000-000000000002';
+  per   uuid;
+begin
+  assert not exists (select 1 from pg_proc where proname in ('mark_subscribed', 'delete_period') and prosecdef),
+         'migration 002 functions must be security invoker';
+
+  insert into services (id, name, role, billing_interval) values
+    (svc,   'RLS Txn Service', 'keeper',  'monthly'),
+    (other, 'RLS Txn Other',   'rotator', 'monthly');
+
+  -- Mark subscribed with "also set as current price": period, charge and price together.
+  r := mark_subscribed(svc, '2026-10-05', '2026-11-05', 'monthly', 1299, true);
+  per := (r -> 'period' ->> 'id')::uuid;
+  assert (select count(*) from periods where service_id = svc) = 1, 'mark_subscribed: no period';
+  assert (select renews_on from periods where id = per) = '2026-11-05', 'mark_subscribed: wrong renews_on';
+  assert (select count(*) from charges where period_id = per and charged_on = '2026-10-05'
+            and amount_cents = 1299 and source = 'manual' and billing_interval = 'monthly') = 1,
+         'mark_subscribed: charge missing or wrong';
+  assert (select price_cents = 1299 and price_checked_on = '2026-10-05' from services where id = svc),
+         'mark_subscribed: price not set';
+  assert (r -> 'service' ->> 'price_cents')::int = 1299 and (r -> 'charge' ->> 'period_id')::uuid = per,
+         'mark_subscribed: returned rows are wrong';
+
+  -- A second open period is refused, and nothing else changes (acceptance 7).
+  begin
+    perform mark_subscribed(svc, '2026-11-01', '2026-12-01', 'monthly', 999, true);
+    raise exception 'two uncancelled periods allowed via mark_subscribed';
+  exception when unique_violation then null;
+  end;
+  assert (select count(*) from charges where service_id = svc) = 1, 'refused mark_subscribed left a charge';
+  assert (select price_cents from services where id = svc) = 1299, 'refused mark_subscribed changed the price';
+
+  -- Catch-up's insert ... on conflict do nothing skips a renewal already recorded (acceptance 9).
+  insert into charges (service_id, period_id, charged_on, amount_cents, billing_interval, source)
+    values (svc, per, '2026-11-05', 1299, 'monthly', 'auto');
+  insert into charges (service_id, period_id, charged_on, amount_cents, billing_interval, source)
+    values (svc, per, '2026-11-05', 1299, 'monthly', 'auto')
+    on conflict (period_id, charged_on) do nothing;
+  assert (select count(*) from charges where period_id = per) = 2, 'on conflict did not skip the duplicate';
+
+  -- A failure after the period insert rolls the period back too (acceptance 17).
+  update periods set cancelled_on = '2026-11-06', access_ends_on = '2026-12-04' where id = per;
+  begin
+    perform mark_subscribed(svc, '2026-11-10', '2026-12-10', 'monthly', -1, true);  -- charge check fails
+    raise exception 'negative amount accepted';
+  exception when check_violation then null;
+  end;
+  assert (select count(*) from periods where service_id = svc) = 1, 'failed mark_subscribed left a period';
+  assert (select price_cents from services where id = svc) = 1299, 'failed mark_subscribed changed the price';
+
+  -- Refused input writes nothing.
+  begin
+    perform mark_subscribed(svc, '2026-11-10', '2026-11-17', 'weekly', 500, false);
+    raise exception 'stale billing interval accepted';
+  exception when invalid_parameter_value then null;
+  end;
+  begin
+    perform mark_subscribed(svc, '2026-11-10', '2026-12-10', 'monthly', null, true);
+    raise exception 'set price without an amount accepted';
+  exception when invalid_parameter_value then null;
+  end;
+  update services set archived_at = now() where id = other;
+  begin
+    perform mark_subscribed(other, '2026-11-10', '2026-12-10', 'monthly', 500, false);
+    raise exception 'archived service marked subscribed';
+  exception when invalid_parameter_value then null;
+  end;
+  update services set archived_at = null where id = other;
+  assert (select count(*) from periods where service_id in (svc, other)) = 1, 'refused input left a period';
+
+  -- Without "set price", an unknown amount is recorded as null and the price is untouched.
+  r := mark_subscribed(other, '2026-11-10', '2026-12-10', 'monthly', null, false);
+  assert (r -> 'charge' -> 'amount_cents') = 'null'::jsonb, 'unknown amount not recorded as null';
+  assert (select price_cents from services where id = other) is null, 'price changed without set price';
+
+  -- Delete period removes the period and all its charges, and nothing else (acceptance 18).
+  insert into charges (service_id, charged_on, amount_cents, billing_interval)
+    values (svc, '2026-01-05', 1000, 'monthly');   -- in no period
+  r := delete_period(per);
+  assert jsonb_array_length(r -> 'charge_ids') = 2, 'delete_period: wrong charges reported';
+  assert not exists (select 1 from periods where id = per), 'delete_period: period kept';
+  assert (select count(*) from charges where service_id = svc) = 1, 'delete_period: removed the wrong charges';
+  assert (select count(*) from charges where service_id = other) = 1, 'delete_period touched another service';
+  assert (select price_cents from services where id = svc) = 1299, 'delete_period changed the service';
+  begin
+    perform delete_period(per);
+    raise exception 'deleting a missing period succeeded';
+  exception when no_data_found then null;
+  end;
 end $$;
 
 select 'ALL RLS CHECKS PASSED' as result;

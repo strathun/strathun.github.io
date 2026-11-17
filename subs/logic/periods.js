@@ -11,10 +11,11 @@ import { groupByService } from './status.js';
 const MAX_CATCH_UP_CHARGES = 1000;
 
 /**
- * Mark subscribed on `date`. The data layer inserts the period first, then sets
- * charge.period_id to the new period's id.
+ * Mark subscribed on `date`, for the amount charged (SPEC §7.3; defaults to the
+ * current price, null = unknown). The database function mark_subscribed() writes
+ * the period, then the charge with the new period's id, in one transaction.
  */
-export function planSubscribe(service, date) {
+export function planSubscribe(service, date, amountCents = service.price_cents ?? null) {
   return {
     period: {
       service_id: service.id,
@@ -24,7 +25,7 @@ export function planSubscribe(service, date) {
     charge: {
       service_id: service.id,
       charged_on: date,
-      amount_cents: service.price_cents ?? null,
+      amount_cents: amountCents,
       billing_interval: service.billing_interval,
       source: 'manual',
     },
@@ -79,7 +80,11 @@ export function planCatchUp(period, service, today) {
   return { charges, renews_on: renewsOn };
 }
 
-/** Catch-up for every period that needs it: [{ period_id, renews_on, charges }]. */
+/**
+ * Catch-up for every period that needs it: [{ period_id, from_renews_on, renews_on, charges }].
+ * from_renews_on is the value it was planned from, so the data layer can advance
+ * renews_on only if no other tab has advanced it already.
+ */
 export function planCatchUpAll({ services, periods, today }) {
   const serviceById = new Map(services.map((s) => [s.id, s]));
   const work = [];
@@ -88,7 +93,7 @@ export function planCatchUpAll({ services, periods, today }) {
     if (!service) continue;
     for (const period of list) {
       const { charges, renews_on } = planCatchUp(period, service, today);
-      if (charges.length) work.push({ period_id: period.id, renews_on, charges });
+      if (charges.length) work.push({ period_id: period.id, from_renews_on: period.renews_on, renews_on, charges });
     }
   }
   return work;

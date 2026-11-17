@@ -122,6 +122,34 @@
   }
   .detail-actions p { flex-basis: 100%; }
 
+  /* ── period history and charges ── */
+  .history {
+    margin-top: 14px; background: var(--bg1); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 14px 18px;
+  }
+  .history .group-title { margin-bottom: 4px; }
+  .period-list { list-style: none; }
+  .period { padding: 10px 0; border-top: 1px solid var(--border); }
+  .period-list .period:first-child { border-top: none; }
+  .period-list + .period { border-top: 1px dashed var(--border); }
+  .period-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 13px; }
+  .period-when { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+  .period-dates { font-weight: 600; }
+  .period-meta { font-size: 11px; color: var(--muted); }
+  .period-delete { margin: 0; padding: 0; font-size: 11px; flex-shrink: 0; }
+  .period-delete:hover { color: var(--danger); }
+  #delp-charges { margin: 0 0 14px; }
+  .charge-edit { margin: 0; padding: 0; font-size: 11px; }
+  .charge-list { list-style: none; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+  .charge {
+    display: grid; grid-template-columns: 8.5em minmax(0, 1fr) auto; gap: 8px; align-items: center;
+    font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  .charge-date { color: var(--muted); }
+  .charge-what { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; min-width: 0; }
+  .charge-amount.unknown { color: var(--warn); }
+  .charge-none { margin-top: 4px; }
+
   /* ── setup checklist ── */
   .checklist {
     background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg);
@@ -134,10 +162,8 @@
   .checklist li::marker { color: var(--muted); }
   .checklist li.done { color: var(--muted); }
   .checklist li.done::marker { content: '✓  '; color: var(--accent2); }
-  .checklist .progress, .checklist .later { display: block; font-size: 11px; margin-top: 2px; }
-  .checklist .progress { color: var(--warn); }
+  .checklist .progress { display: block; font-size: 11px; margin-top: 2px; color: var(--warn); }
   .checklist li.done .progress { color: var(--accent2); }
-  .checklist .later { color: var(--muted); font-style: italic; }
   .empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
   .empty, .loading-msg, .load-error {
@@ -146,6 +172,13 @@
   }
   .empty p + p, .load-error .btn { margin-top: 12px; }
   .load-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+  .banner-error {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
+    margin-bottom: 16px; padding: 10px 12px; border-radius: var(--radius); font-size: 12px;
+    color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+    background: color-mix(in srgb, var(--danger) 6%, transparent);
+  }
+  .banner-error span { min-width: 0; overflow-wrap: anywhere; }
 
   /* ── modal ── */
   .overlay {
@@ -215,7 +248,16 @@
   .modal-actions { display: flex; gap: 10px; margin-top: 12px; }
   .modal-actions .btn { padding: 10px 14px; font-size: 13px; }
   .modal-actions .btn-primary, .modal-actions .btn-danger { flex: 1; }
-  .del-warning { margin-bottom: 14px; }
+  .del-warning, .modal-lead { margin-bottom: 14px; }
+  .modal-lead strong { color: var(--text); font-weight: 600; }
+  .field-hint:empty { display: none; }
+  .cancel-prompt {
+    margin-bottom: 16px; padding: 10px 12px; border-radius: var(--radius); font-size: 12px;
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+    background: color-mix(in srgb, var(--warn) 8%, transparent);
+  }
+  .cancel-prompt p { color: var(--warn); }
+  .cancel-prompt .btn, .cancel-prompt .manage-path { margin-top: 10px; }
   .del-warning strong { color: var(--text); }
 
   /* ── toast ── */
@@ -368,6 +410,136 @@
       <div class="modal-actions">
         <button class="btn" type="button" data-action="close-delete">cancel</button>
         <button class="btn btn-danger" type="submit" id="del-go" disabled>delete forever</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Mark subscribed (SPEC §7.3): one period + its first charge, in one transaction ── -->
+<div class="overlay" id="sub-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sub-title">
+    <div class="modal-title">
+      <span id="sub-title">mark subscribed</span>
+      <button class="close-btn" type="button" data-action="close-sub" aria-label="close">×</button>
+    </div>
+    <form id="sub-form" novalidate autocomplete="off">
+      <p class="small muted modal-lead">
+        billed <strong id="sub-interval"></strong>. if that's wrong, edit the service first:
+        renewal dates and charges depend on it.
+      </p>
+      <div class="row2">
+        <div class="field">
+          <label for="sub-date">charged on</label>
+          <input id="sub-date" name="date" type="date">
+          <div class="field-error" data-for="date"></div>
+        </div>
+        <div class="field">
+          <label for="sub-amount">amount charged ($)</label>
+          <input id="sub-amount" name="amount" type="text" inputmode="decimal" placeholder="unknown">
+          <div class="field-error" data-for="amount"></div>
+        </div>
+      </div>
+      <div class="field" id="sub-setprice" hidden>
+        <label class="check"><input type="checkbox" name="set_price"> also set as current price</label>
+        <div class="field-hint">price on file: <span id="sub-price-now"></span>. ticking saves this amount, checked on this date.</div>
+      </div>
+      <div class="field-hint" id="sub-hint" aria-live="polite"></div>
+      <div class="modal-error" id="sub-error" role="alert"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-sub">cancel</button>
+        <button class="btn btn-primary" type="submit" id="sub-save">mark subscribed</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Mark cancelled (SPEC §7.3, §9): sets cancelled_on and access_ends_on ── -->
+<div class="overlay" id="cancel-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cancel-title">
+    <div class="modal-title">
+      <span id="cancel-title">mark cancelled</span>
+      <button class="close-btn" type="button" data-action="close-cancel" aria-label="close">×</button>
+    </div>
+    <form id="cancel-form" novalidate autocomplete="off">
+      <div class="cancel-prompt" id="cancel-prompt" hidden>
+        <p id="cancel-prompt-text"></p>
+        <div id="cancel-manage"></div>
+      </div>
+      <p class="small muted modal-lead">turn off auto-renew on the service's site first, then record it here.</p>
+      <div class="row2">
+        <div class="field">
+          <label for="cancel-date">cancelled on</label>
+          <input id="cancel-date" name="cancelled_on" type="date">
+          <div class="field-error" data-for="cancelled_on"></div>
+        </div>
+        <div class="field">
+          <label for="cancel-ends">access ends</label>
+          <input id="cancel-ends" name="access_ends_on" type="date">
+          <div class="field-error" data-for="access_ends_on"></div>
+        </div>
+      </div>
+      <div class="field-hint" id="cancel-ends-hint"></div>
+      <div class="modal-error" id="cancel-error" role="alert"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-cancel">not now</button>
+        <button class="btn btn-primary" type="submit" id="cancel-save">mark cancelled</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Delete period (SPEC §8.3): the period and its charges, in one transaction ── -->
+<div class="overlay" id="delp-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="delp-title">
+    <div class="modal-title">
+      <span id="delp-title">delete period</span>
+      <button class="close-btn" type="button" data-action="close-delp" aria-label="close">×</button>
+    </div>
+    <form id="delp-form" novalidate>
+      <p class="small muted del-warning">
+        this removes the <strong id="delp-period"></strong> period <span id="delp-count"></span>.
+        spend stops counting them. it can't be undone.
+      </p>
+      <ul class="charge-list" id="delp-charges"></ul>
+      <p class="small muted modal-lead">to fix a start date, delete the period, then mark subscribed again on the right date.</p>
+      <div class="modal-error" id="delp-error" role="alert"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-delp">keep it</button>
+        <button class="btn btn-danger" type="submit" id="delp-go">delete period</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Edit charge (SPEC §8.3): amount and date, optionally saving the amount as the price ── -->
+<div class="overlay" id="chg-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="chg-title">
+    <div class="modal-title">
+      <span id="chg-title">edit charge</span>
+      <button class="close-btn" type="button" data-action="close-chg" aria-label="close">×</button>
+    </div>
+    <form id="chg-form" novalidate autocomplete="off">
+      <p class="small muted modal-lead" id="chg-lead"></p>
+      <div class="row2">
+        <div class="field">
+          <label for="chg-date">charged on</label>
+          <input id="chg-date" name="charged_on" type="date">
+          <div class="field-error" data-for="charged_on"></div>
+        </div>
+        <div class="field">
+          <label for="chg-amount">amount ($)</label>
+          <input id="chg-amount" name="amount" type="text" inputmode="decimal" placeholder="unknown">
+          <div class="field-error" data-for="amount"></div>
+        </div>
+      </div>
+      <div class="field" id="chg-setprice" hidden>
+        <label class="check"><input type="checkbox" name="set_price"> also set as current price</label>
+        <div class="field-hint">price on file: <span id="chg-price-now"></span>. ticking saves this amount, checked on this charge's date, so later renewals use it.</div>
+      </div>
+      <div class="modal-error" id="chg-error" role="alert"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-chg">cancel</button>
+        <button class="btn btn-primary" type="submit" id="chg-save">save</button>
       </div>
     </form>
   </div>

@@ -17,6 +17,12 @@ test('planSubscribe with an unknown price records a charge with an unknown amoun
   assert.equal(planSubscribe(svc({ price_cents: null }), TODAY).charge.amount_cents, null);
 });
 
+test('planSubscribe records the amount actually charged, which may be unknown', () => {
+  const s = svc({ price_cents: 1799 });
+  assert.equal(planSubscribe(s, TODAY, 1999).charge.amount_cents, 1999);
+  assert.equal(planSubscribe(s, TODAY, null).charge.amount_cents, null);
+});
+
 test('planSubscribe backfills an annual subscription', () => {
   const plan = planSubscribe(svc({ billing_interval: 'annual', price_cents: 12000 }), '2025-08-10');
   assert.equal(plan.period.renews_on, '2026-08-10');
@@ -152,8 +158,8 @@ test('planCatchUpAll returns work only for due, uncancelled periods (archived in
     period({ id: 'pd', service_id: 'c', started_on: '2026-05-01', renews_on: '2026-06-01', cancelled_on: '2026-05-01', access_ends_on: '2026-05-31' }),
   ];
   const work = planCatchUpAll({ services: [a, b, c], periods, today: TODAY });
-  assert.deepEqual(work.map((w) => [w.period_id, w.renews_on, w.charges.length]), [
-    ['pa', '2026-12-16', 1],
-    ['pb', '2026-12-01', 2],
+  assert.deepEqual(work.map((w) => [w.period_id, w.from_renews_on, w.renews_on, w.charges.length]), [
+    ['pa', TODAY, '2026-12-16', 1],
+    ['pb', '2026-10-01', '2026-12-01', 2],
   ]);
 });

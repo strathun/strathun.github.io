@@ -1,8 +1,14 @@
 # Subscription Rotation Tracker — Spec
 
-Status: Draft v1.5 · Owner: Hunter · Route: `strathun.github.io/subs/`
+Status: Draft v1.6 · Owner: Hunter · Route: `strathun.github.io/subs/`
 
 **Changelog**
+- v1.6 (2026-11-17): rules settled while building step 4's data entry.
+  - Mark subscribed refuses an archived service, a billing interval that changed since the page loaded, and a date so far back that catch-up would record over 1000 renewals (§7.3).
+  - A $0 charge offers "Also set as current price" unticked, so a free trial doesn't become the price (§7.3).
+  - Mark cancelled on a backfill whose renewal date has passed defaults to the start date, and refuses a date on or after that renewal (§7.3).
+  - The cancel prompt also follows Mark subscribed for a backfill with a renewal pending, for keepers too (§9).
+  - Editing a charge with "Also set as current price" saves the price first, then the charge (§8.3).
 - v1.5 (2026-11-17): settled the subscribe/cancel gaps before building step 4.
   - Mark subscribed asks for the amount charged and can save it as the service's price, so prices and dates are entered together (§7.3).
   - Mark subscribed and Delete period each run in one database transaction (§6, §7.3, §8.3).
@@ -170,13 +176,16 @@ Archived services show no alerts.
 - **Amount unknown**: any charge with null `amount_cents`.
 
 ### 7.3 Subscribing, cancelling, automatic renewals
-- **Mark subscribed** (date defaults to today and is editable, so the same flow backfills history; it can't be in the future):
+- **Mark subscribed** (date defaults to today and is editable, so the same flow backfills history; it can't be in the future, or so far back that catch-up would record more than 1000 renewals):
   - asks for the **amount charged**, prefilled from `price_cents`. Blank records an unknown amount;
   - creates a period with `started_on = date` and `renews_on = date + 1 interval`;
   - creates a charge on `date` for that amount;
-  - **Also set as current price** (checkbox, shown when the amount differs from `price_cents` or the price is unknown; ticked by default when the price is unknown): sets `price_cents` to the amount and `price_checked_on` to `date`, so catch-up renewals charge the right amount;
-  - writes the period, the charge and any price change in one transaction (§6), so a dropped connection can't leave a period without its charge.
+  - **Also set as current price** (checkbox, shown when an amount is entered and it differs from `price_cents` or the price is unknown; ticked by default when the price is unknown, except for $0, since a free trial is rarely the next price): sets `price_cents` to the amount and `price_checked_on` to `date`, so catch-up renewals charge the right amount;
+  - writes the period, the charge and any price change in one transaction (§6), so a dropped connection can't leave a period without its charge;
+  - is refused for an archived service (restore it first: an archived service shows no alerts, so it must not start renewing), and when the service's billing interval changed since the page loaded (reload, so `renews_on` uses the right interval).
 - **Mark cancelled**: sets `cancelled_on` (default today). Default `access_ends_on = renews_on - 1 day`, editable, because the service's confirmation screen states the real date.
+  - `cancelled_on` can't be in the future or before `started_on`. `access_ends_on` can't be before `cancelled_on` (it can be the same day, e.g. a refund that ends access at once).
+  - **Backfill with a renewal pending** (`renews_on <= today`, so catch-up hasn't run yet): the default is `started_on` (cancel on day one), and a date on or after `renews_on` is refused, because that renewal's charge would never be recorded. To record a cancellation after it, reload first so catch-up records the renewal.
 - **Automatic renewal catch-up** runs on app load, for each period with `cancelled_on` null and `renews_on <= today`:
   1. insert a charge (`charged_on = renews_on`, `amount_cents = price_cents`, `source = auto`);
   2. advance `renews_on` one interval;
@@ -240,7 +249,8 @@ Among inactive, non-archived rotators with at least one open watchlist item, pic
 3. **Service detail** (its own URL, `#/s/{id}`, so the browser back button returns to the dashboard)
    - Status, the **Open manage page** button, help link, price ("checked {date}"), notes.
    - Period history. **Delete period** removes the period and its charges in one transaction (§6), after a confirmation that lists the charges it removes. It's how a backfill mistake is fixed: to change a start date, delete the period and mark subscribed again.
-   - Charges, with `auto` ones badged. Amount and date are editable. Changing an amount offers **Also set as current price** (sets `price_cents`, and `price_checked_on` to the charge date).
+   - Charges, with `auto` ones badged. Amount and date are editable. Changing an amount offers **Also set as current price** (sets `price_cents`, and `price_checked_on` to the charge date), offered and ticked by the same rule as Mark subscribed. Two charges in one period can't share a date.
+     - The price and the charge are two writes, not one transaction. The price is saved first: if the charge then fails, the error says the price was saved, and a retry only resends the charge. A new price with an old charge amount meanwhile is harmless, since the price only affects later renewals.
    - Watchlist.
    - Actions: **Mark subscribed**, **Mark cancelled**, **Add reminder (.ics)**, Edit, Archive.
 4. **Add / edit / remove services**
@@ -259,6 +269,7 @@ Among inactive, non-archived rotators with at least one open watchlist item, pic
 1. Tap **Open manage page** and subscribe on the service's site.
 2. Back in the app, tap **Mark subscribed** (records the charge).
 3. The app immediately prompts "Cancel auto-renew now?" with the manage link.
+   - For a backfill whose renewal date has passed, the prompt follows Mark subscribed for any role and asks whether the period ended back then. Cancelling it there stops the next load from recording its renewals. "Not now" leaves it renewing.
 4. Tap **Mark cancelled** and confirm `access_ends_on`.
 5. The service shows "Active until {date}".
 
