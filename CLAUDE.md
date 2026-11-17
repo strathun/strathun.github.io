@@ -37,7 +37,8 @@ strathun.github.io/
 │   ├── index.html       # Markup + styles; loads app.js as a module
 │   ├── app.js           # Rendering, hash routes (#/ dashboard, #/s/{id} detail), events
 │   ├── db.js            # Supabase calls; throws DbError so the page can show it
-│   └── logic/           # Pure logic (SPEC §7, service form, starter list) + *.test.js, no DOM or Supabase
+│   ├── logic/           # Pure logic (SPEC §7, service form, starter list) + *.test.js, no DOM or Supabase
+│   └── dev/             # Browser checks: Playwright + a fake in-memory Supabase (see its README)
 ├── runs/                # Public share pages (see "Public pages" below)
 │   ├── dead-horse/      # Dead Horse 50K training map: index.html + routes.json
 │   └── tools/
@@ -223,6 +224,10 @@ cd subs && node --test
 ```
 
 `.github/workflows/subs-tests.yml` runs them on any push or PR touching `subs/`, in two timezones.
+
+**Browser checks:** `node subs/dev/run.cjs` drives the subs pages in Chromium against a fake Supabase
+(no sign-in, no real data) with the clock frozen at 2026-11-16. Run it after UI changes and add a
+`checks-*.cjs` for new screens. Not in CI. See `subs/dev/README.md`.
 
 **Deploy:** just `git push origin master` — GitHub Pages auto-deploys within ~60 seconds.
 No build step. CI only runs tests; it doesn't deploy.

@@ -1,0 +1,51 @@
+# subs/dev — browser checks
+
+Playwright scripts that drive the real subs pages against a **fake, in-memory Supabase**,
+so UI behaviour can be checked without signing in or touching the real database.
+They complement the unit tests in `subs/logic/` (rules) by covering the page (rendering,
+dialogs, routing, error messages, phone-width layout).
+
+Not part of the app and not run in CI (CI only runs `node --test`).
+
+## Run
+
+From the repo root:
+
+```bash
+node subs/dev/run.cjs
+```
+
+That starts a small local server, runs every `checks-*.cjs`, and exits 1 if anything fails.
+A single file also runs on its own: `node subs/dev/checks-detail.cjs`.
+Screenshots go to your temp folder under `subs-shots/` (or `SHOTS_DIR`).
+
+Needs Playwright with Chromium. Claude Code cloud sessions already have it. Locally:
+
+```bash
+npm install --no-save playwright
+```
+
+```bash
+npx playwright install chromium
+```
+
+## Files
+
+| file | what |
+|---|---|
+| `fake-supabase.js` | stand-in for supabase-js: in-memory tables, seeding, blocked writes, slow responses |
+| `harness.cjs` | static server, browser context with the fake and a **frozen clock** (2026-11-16), check/report helpers |
+| `run.cjs` | runs every `checks-*.cjs` against one server |
+| `checks-services.cjs` | dashboard list, add/edit form |
+| `checks-detail.cjs` | detail view, archive, restore, delete |
+| `checks-starter.cjs` | starter list, setup checklist |
+| `checks-dialogs.cjs` | dialogs during slow saves, back button, malformed links |
+| `checks-nav.cjs` | shared nav on every page at 375–1280px |
+
+## Writing a check
+
+- Name it `checks-<area>.cjs`. Never `test-*.js` or `*.test.js`: `node --test` would run it.
+- Seed data with dates around the frozen clock (2026-11-16, the same day as `subs/logic/fixtures.js`),
+  so date text like "until dec 9" never changes as real time passes.
+- The fake enforces only the unique service name. Anything the database guarantees
+  (RLS, foreign keys, transactions) still needs `subs/rls-test.sql` or a real-database check.
