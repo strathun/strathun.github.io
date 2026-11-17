@@ -6,8 +6,11 @@
 //   in localStorage '__seed' before the page loads.
 // - Enforces unique lower(name) on services (Postgres error 23505), like the real index.
 //   Nothing else is enforced: no RLS, no foreign keys, no other constraints.
+// - rpc() runs JS copies of the migrations/002 functions (see RPC below): same checks,
+//   same error codes, and all-or-nothing writes.
 // - window.__fake hooks: tables, calls (every query made), blockWrites (updates and
-//   deletes return zero rows, like an RLS block), delay (ms before each response).
+//   deletes return zero rows, like an RLS block), delay (ms before each response),
+//   rpcError ({ code, message }: the next rpc fails with it and writes nothing).
 // - Unknown query methods (gte, in, limit, …) are accepted and ignored, so other pages load.
 (function () {
   const tables = { services: [], periods: [], charges: [], watchlist_items: [] };
@@ -64,6 +67,47 @@
     return proxy;
   }
 
+  // ── rpc: JS copies of subs/migrations/002-*.sql ──────────────────────────
+  const fail = (code, message) => ({ data: null, error: { code, message } });
+  const copy = (r) => ({ ...r });
+  const RPC = {
+    mark_subscribed(a) {
+      const s = tables.services.find((x) => x.id === a.p_service_id);
+      if (!s) return fail('P0002', 'service not found, or not yours');
+      if (s.archived_at) return fail('22023', 'restore the service before marking it subscribed');
+      if (s.billing_interval !== a.p_billing_interval) return fail('22023', 'its billing interval changed since the page loaded. reload and try again');
+      if (a.p_set_price && a.p_amount_cents == null) return fail('22023', 'enter the amount to save it as the price');
+      if (tables.periods.some((p) => p.service_id === s.id && p.cancelled_on == null)) {
+        return fail('23505', 'duplicate key value violates unique constraint "periods_one_open_per_service"');
+      }
+      const period = { id: `periods-${++seq}`, service_id: s.id, started_on: a.p_started_on, renews_on: a.p_renews_on, cancelled_on: null, access_ends_on: null };
+      const charge = { id: `charges-${++seq}`, service_id: s.id, period_id: period.id, charged_on: a.p_started_on, amount_cents: a.p_amount_cents, billing_interval: a.p_billing_interval, source: 'manual' };
+      tables.periods.push(period);
+      tables.charges.push(charge);
+      if (a.p_set_price) Object.assign(s, { price_cents: a.p_amount_cents, price_checked_on: a.p_started_on });
+      return { data: { period: copy(period), charge: copy(charge), service: copy(s) }, error: null };
+    },
+  };
+
+  function rpc(name, args) {
+    return {
+      then(resolve, reject) {
+        const go = () => {
+          fake.calls.push({ table: null, op: 'rpc', name, payload: args, filters: [] });
+          if (fake.rpcError) {
+            const { code, message } = fake.rpcError;
+            fake.rpcError = null;
+            return fail(code, message);
+          }
+          if (!RPC[name]) return fail('PGRST202', `Could not find the function public.${name} in the schema cache`);
+          return RPC[name](args);
+        };
+        const run = () => Promise.resolve().then(go).then(resolve, reject);
+        return fake.delay ? new Promise((r) => setTimeout(r, fake.delay)).then(run) : run();
+      },
+    };
+  }
+
   window.supabase = {
     createClient() {
       return {
@@ -72,6 +116,7 @@
           signOut: async () => ({}),
         },
         from: builder,
+        rpc,
       };
     },
   };

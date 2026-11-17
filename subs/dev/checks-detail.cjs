@@ -41,7 +41,7 @@ const SEED = {
   check('manage button links out', manage === 'https://www.spotify.com/account/' && (await page.getAttribute('a:has-text("open manage page")', 'target')) === '_blank' && (await page.getAttribute('a:has-text("open manage page")', 'rel')).includes('noopener'));
   check('help link shown', (await page.getAttribute('a:has-text("how to cancel")', 'href')) === 'https://support.spotify.com/x');
   check('unverified link explained', await page.isVisible('text=this link is a best guess'));
-  check('D1: archive disabled while renewing, with hint', (await page.isDisabled('[data-action="archive"]')) && await page.isVisible('#archive-hint'));
+  check('D1: archive disabled while renewing, with hint', (await page.isDisabled('[data-action="archive"]')) && await page.isVisible('#actions-hint'));
   await page.click('[data-action="archive"]', { force: true });
   check('D1: forced click on disabled archive does nothing', !(await page.evaluate(() => window.__fake.calls.some((c) => c.op === 'update'))));
   check('no restore/delete on a live service', (await page.$$('[data-action="restore"], [data-action="delete"]')).length === 0);

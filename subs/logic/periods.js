@@ -11,10 +11,11 @@ import { groupByService } from './status.js';
 const MAX_CATCH_UP_CHARGES = 1000;
 
 /**
- * Mark subscribed on `date`. The data layer inserts the period first, then sets
- * charge.period_id to the new period's id.
+ * Mark subscribed on `date`, for the amount charged (SPEC §7.3; defaults to the
+ * current price, null = unknown). The database function mark_subscribed() writes
+ * the period, then the charge with the new period's id, in one transaction.
  */
-export function planSubscribe(service, date) {
+export function planSubscribe(service, date, amountCents = service.price_cents ?? null) {
   return {
     period: {
       service_id: service.id,
@@ -24,7 +25,7 @@ export function planSubscribe(service, date) {
     charge: {
       service_id: service.id,
       charged_on: date,
-      amount_cents: service.price_cents ?? null,
+      amount_cents: amountCents,
       billing_interval: service.billing_interval,
       source: 'manual',
     },

@@ -33,7 +33,7 @@ npx playwright install chromium
 
 | file | what |
 |---|---|
-| `fake-supabase.js` | stand-in for supabase-js: in-memory tables, seeding, blocked writes, slow responses |
+| `fake-supabase.js` | stand-in for supabase-js: in-memory tables, seeding, `rpc()` copies of the migration functions, blocked writes, failed rpcs, slow responses |
 | `harness.cjs` | static server, browser context with the fake and a **frozen clock** (2026-11-16), check/report helpers |
 | `run.cjs` | runs every `checks-*.cjs` against one server |
 | `checks-services.cjs` | dashboard list, add/edit form |
@@ -42,6 +42,7 @@ npx playwright install chromium
 | `checks-dialogs.cjs` | dialogs during slow saves, back button, malformed links |
 | `checks-nav.cjs` | shared nav on every page at 375–1280px |
 | `checks-history.cjs` | period history and charges on service detail |
+| `checks-subscribe.cjs` | mark subscribed: amount, set-as-price, validation, failed transactions |
 | `supabase-stub.sql` | roles, `auth.users` and `auth.uid()`: enough Supabase for plain Postgres |
 | `sql-check.sh` | runs `schema.sql`, `migrations/*.sql` and `rls-test.sql` on a local Postgres |
 

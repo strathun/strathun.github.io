@@ -17,6 +17,12 @@ test('planSubscribe with an unknown price records a charge with an unknown amoun
   assert.equal(planSubscribe(svc({ price_cents: null }), TODAY).charge.amount_cents, null);
 });
 
+test('planSubscribe records the amount actually charged, which may be unknown', () => {
+  const s = svc({ price_cents: 1799 });
+  assert.equal(planSubscribe(s, TODAY, 1999).charge.amount_cents, 1999);
+  assert.equal(planSubscribe(s, TODAY, null).charge.amount_cents, null);
+});
+
 test('planSubscribe backfills an annual subscription', () => {
   const plan = planSubscribe(svc({ billing_interval: 'annual', price_cents: 12000 }), '2025-08-10');
   assert.equal(plan.period.renews_on, '2026-08-10');

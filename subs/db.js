@@ -9,14 +9,22 @@ export class DbError extends Error {
 }
 
 const UNIQUE_VIOLATION = '23505';
+const NAME_TAKEN = { [UNIQUE_VIOLATION]: 'a service with that name already exists' };
 
-function unwrap({ data, error }, what) {
+// PostgREST can't find the function: subs/migrations/002-*.sql hasn't been run.
+const MISSING_FUNCTION = 'PGRST202';
+const NEEDS_MIGRATION = {
+  [MISSING_FUNCTION]: 'the database is missing migration 002. run subs/migrations/002-subscribe-and-delete-period.sql in supabase, then reload.',
+};
+
+/**
+ * The data, or a DbError. `known` maps an error code to the whole message to show
+ * (e.g. a unique violation whose meaning depends on the table).
+ */
+function unwrap({ data, error }, what, known = {}) {
   if (!error) return data;
   console.error(what, error);
-  if (error.code === UNIQUE_VIOLATION) {
-    throw new DbError('a service with that name already exists', error.code);
-  }
-  throw new DbError(`couldn't ${what}: ${error.message}`, error.code);
+  throw new DbError(known[error.code] ?? `couldn't ${what}: ${error.message}`, error.code);
 }
 
 /**
@@ -43,12 +51,12 @@ export async function loadAll() {
 
 export async function insertService(row) {
   const res = await window.sb.from('services').insert(row).select();
-  return one(unwrap(res, 'add the service'), 'add the service');
+  return one(unwrap(res, 'add the service', NAME_TAKEN), 'add the service');
 }
 
 export async function updateService(id, row, what = 'save the service') {
   const res = await window.sb.from('services').update(row).eq('id', id).select();
-  return one(unwrap(res, what), what);
+  return one(unwrap(res, what, NAME_TAKEN), what);
 }
 
 /** Archive (SPEC §8.4): hides the service but keeps its history. */
@@ -69,5 +77,29 @@ export async function deleteService(id) {
 /** One bulk insert is one statement: all rows go in, or none do. */
 export async function insertServices(rows) {
   const res = await window.sb.from('services').insert(rows).select();
-  return unwrap(res, 'load the starter list');
+  return unwrap(res, 'load the starter list', NAME_TAKEN);
+}
+
+// ── periods and charges (SPEC §7.3, §8.3) ───────────────────────────────────
+
+/**
+ * Mark subscribed: planSubscribe()'s period and charge, plus the price change when
+ * setPrice, in one transaction (migrations/002). Resolves to { period, charge, service }.
+ */
+export async function markSubscribed({ period, charge }, setPrice) {
+  const what = 'mark it subscribed';
+  const res = await window.sb.rpc('mark_subscribed', {
+    p_service_id: period.service_id,
+    p_started_on: period.started_on,
+    p_renews_on: period.renews_on,
+    p_billing_interval: charge.billing_interval,
+    p_amount_cents: charge.amount_cents,
+    p_set_price: !!setPrice,
+  });
+  const data = unwrap(res, what, {
+    ...NEEDS_MIGRATION,
+    [UNIQUE_VIOLATION]: "it already has a period that isn't cancelled. reload the page.",
+  });
+  if (!data?.period || !data?.charge || !data?.service) throw new DbError(`couldn't ${what}: no rows came back`);
+  return data;
 }

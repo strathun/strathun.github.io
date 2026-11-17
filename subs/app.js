@@ -9,12 +9,13 @@
 //   #/s/{id}  service detail
 
 import { todayLocal, formatDay } from './logic/dates.js';
-import { groupByService, serviceStatus } from './logic/status.js';
+import { groupByService, serviceStatus, openPeriod } from './logic/status.js';
 import {
   CATEGORIES, INTERVALS, INTERVAL_SHORT, formatCents, formatPrice, formValues, serviceFromForm,
-  findNameConflict, groupServices, serviceBadges, canArchive, isWebUrl, setupProgress,
+  findNameConflict, groupServices, serviceBadges, canArchive, isWebUrl, setupProgress, parseCents,
 } from './logic/services.js';
 import { periodHistory } from './logic/history.js';
+import { setPriceOption, subscribeDefaults, subscribeFromForm } from './logic/entry.js';
 import { starterRows } from './logic/starter.js';
 import * as db from './db.js';
 
@@ -109,6 +110,17 @@ function upsertLocal(row) {
   const i = state.services.findIndex((s) => s.id === row.id);
   if (i === -1) state.services.push(row);
   else state.services[i] = row;
+}
+
+/** Adds or replaces a period or charge row in its service's list. */
+function putRow(map, row) {
+  const list = map.get(row.service_id);
+  if (!list) map.set(row.service_id, [row]);
+  else {
+    const i = list.findIndex((r) => r.id === row.id);
+    if (i === -1) list.push(row);
+    else list[i] = row;
+  }
 }
 
 function removeLocal(id) {
@@ -235,7 +247,6 @@ function checklistHtml() {
           for each service you pay for now, mark subscribed on the date of its most recent charge
           (spotify, uzzu, nintendo, claude, google one, paramount+, amazon prime, icloud+, netflix, ps plus).
           annual keepers (nintendo, google one, prime) may go back to 2025; that's what makes this year's spend right.
-          ${later}
         </li>
         <li>for rotators you've already cancelled (or cancel now), mark cancelled. ${later}</li>
         <li>optional: backfill earlier rotations this year, so the year view and averages cover the whole year. ${later}</li>
@@ -348,11 +359,21 @@ function renderDetail(id) {
       <button class="btn" data-action="restore" data-id="${esc(service.id)}">restore</button>
       <button class="btn btn-danger" data-action="delete" data-id="${esc(service.id)}">delete permanently…</button>`;
   } else {
+    // At most one uncancelled period (SPEC §6): while it exists, Mark subscribed is off (acceptance 7).
+    const open = openPeriod(periodsOf(service.id));
     const allowed = canArchive(status.status);
+    const id = esc(service.id);
+    const hint = !open
+      ? ''
+      : allowed
+        ? 'a period is still renewing. mark it cancelled before subscribing again.'
+        : "still renewing. mark it cancelled before subscribing again or archiving, so its charges can't continue unseen.";
+    const off = 'disabled aria-describedby="actions-hint"';
     actions = `
-      <button class="btn" data-action="edit" data-id="${esc(service.id)}">edit</button>
-      <button class="btn" data-action="archive" data-id="${esc(service.id)}" ${allowed ? '' : 'disabled aria-describedby="archive-hint"'}>archive</button>
-      ${allowed ? '' : `<p class="muted small" id="archive-hint">still renewing. mark it cancelled before archiving, so its charges can't continue unseen.</p>`}`;
+      <button class="btn ${open ? '' : 'btn-primary'}" data-action="subscribe" data-id="${id}" ${open ? off : ''}>mark subscribed</button>
+      <button class="btn" data-action="edit" data-id="${id}">edit</button>
+      <button class="btn" data-action="archive" data-id="${id}" ${allowed ? '' : off}>archive</button>
+      ${hint ? `<p class="muted small" id="actions-hint">${hint}</p>` : ''}`;
   }
 
   $('#view').innerHTML = `
@@ -486,15 +507,20 @@ function readForm() {
   return values;
 }
 
-function showErrors(errors) {
-  for (const el of form.querySelectorAll('.field-error')) {
+/** Shows `errors` (field → message, 'form' for the whole form) in a dialog's form. */
+function markErrors(formEl, errors) {
+  for (const el of formEl.querySelectorAll('.field-error')) {
     el.textContent = errors[el.dataset.for] ?? '';
   }
-  for (const el of form.querySelectorAll('input, select, textarea')) {
+  for (const el of formEl.querySelectorAll('input, select, textarea')) {
     if (errors[el.name]) el.setAttribute('aria-invalid', 'true');
     else el.removeAttribute('aria-invalid');
   }
-  $('#svc-error').textContent = '';
+  formEl.querySelector('.modal-error').textContent = errors.form ?? '';
+}
+
+function showErrors(errors) {
+  markErrors(form, errors);
 }
 
 async function saveForm(event) {
@@ -610,6 +636,137 @@ async function confirmDelete(event) {
   }
 }
 
+// ── dialogs for periods and charges ─────────────────────────────────────────
+
+/**
+ * Runs a dialog's save. The dialog stays open (dialogBusy) until the request ends,
+ * so a failure is shown inside it. `fn` returns what to do once it has closed.
+ */
+async function submitDialog(modalId, button, busyLabel, fn) {
+  const label = button.textContent;
+  const errorEl = $(`#${modalId} .modal-error`);
+  button.disabled = true;
+  button.textContent = busyLabel;
+  errorEl.textContent = '';
+  dialogBusy = true;
+  let after;
+  try {
+    after = await fn();
+  } catch (err) {
+    errorEl.textContent = err.message;
+    return;
+  } finally {
+    dialogBusy = false;
+    button.disabled = false;
+    button.textContent = label;
+  }
+  CLOSERS[modalId]();
+  after?.();
+}
+
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
+}
+
+/** False while a request is in flight: the dialog stays open to show how it ends. */
+function closeModal(id) {
+  if (dialogBusy) return false;
+  document.getElementById(id).classList.remove('open');
+  return true;
+}
+
+// ── mark subscribed (SPEC §7.3) ─────────────────────────────────────────────
+
+const subForm = $('#sub-form');
+const subField = (name) => subForm.elements.namedItem(name);
+/** The service in the Mark subscribed dialog. */
+let subscribing = null;
+/** Once the user ticks or unticks "also set as current price", stop changing it for them. */
+let setPriceTouched = false;
+
+function openSubscribe(button) {
+  const service = findService(button.dataset.id);
+  if (!service) {
+    toast('that service is gone. reload the page.', { error: true });
+    return;
+  }
+  subscribing = service;
+  setPriceTouched = false;
+  const today = todayLocal();
+  const values = subscribeDefaults(service, today);
+  subField('date').value = values.date;
+  subField('date').max = today;
+  subField('amount').value = values.amount;
+  subField('set_price').checked = values.set_price;
+  $('#sub-title').textContent = `mark ${service.name} subscribed`;
+  $('#sub-interval').textContent = service.billing_interval;
+  markErrors(subForm, {});
+  updateSubscribeHints();
+  openModal('sub-modal');
+  subField('date').focus();
+}
+
+function closeSubscribe() {
+  if (closeModal('sub-modal')) subscribing = null;
+}
+
+function readSubscribe() {
+  return { date: subField('date').value, amount: subField('amount').value, set_price: subField('set_price').checked };
+}
+
+function renewalHint({ period }, missed, today) {
+  const renews = formatDay(period.renews_on, today);
+  if (!missed.length) return `renews ${renews}.`;
+  const n = missed.length;
+  const span = n === 1 ? renews : `${renews} to ${formatDay(missed[n - 1], today)}`;
+  return `${n} renewal${n === 1 ? '' : 's'} since (${span}). the app records ${n === 1 ? 'it' : 'them'} the next time it loads, unless you mark this period cancelled first.`;
+}
+
+/** Keeps the price option and the renewal hint in step with what's typed. */
+function updateSubscribeHints() {
+  const service = subscribing;
+  if (!service) return;
+  const today = todayLocal();
+  const values = readSubscribe();
+  const amount = parseCents(values.amount);
+  const option = setPriceOption(service, amount.error ? null : amount.value);
+  $('#sub-setprice').hidden = !option.show;
+  if (!setPriceTouched) subField('set_price').checked = option.checked;
+  $('#sub-price-now').textContent = service.price_cents == null ? 'unknown' : formatPrice(service);
+
+  const { plan, missed } = subscribeFromForm(values, { service, periods: periodsOf(service.id), today });
+  $('#sub-hint').textContent = plan ? renewalHint(plan, missed, today) : '';
+}
+
+function onSubscribeInput(event) {
+  if (event.target.name === 'set_price') setPriceTouched = true;
+  updateSubscribeHints();
+}
+
+async function saveSubscribe(event) {
+  event.preventDefault();
+  const service = subscribing;
+  if (!service || dialogBusy) return;
+  const { plan, setPrice, errors } = subscribeFromForm(readSubscribe(), {
+    service, periods: periodsOf(service.id), today: todayLocal(),
+  });
+  markErrors(subForm, errors);
+  const firstBad = Object.keys(errors).find((k) => k !== 'form');
+  if (firstBad) subField(firstBad).focus();
+  if (!plan) return;
+
+  await submitDialog('sub-modal', $('#sub-save'), 'saving…', async () => {
+    const saved = await db.markSubscribed(plan, setPrice);
+    putRow(state.periodsByService, saved.period);
+    putRow(state.chargesByService, saved.charge);
+    upsertLocal(saved.service);
+    return () => {
+      render();
+      toast(`marked ${service.name} subscribed`);
+    };
+  });
+}
+
 // ── events ──────────────────────────────────────────────────────────────────
 
 const ACTIONS = {
@@ -636,6 +793,8 @@ const ACTIONS = {
   },
   archive: (el) => setArchived(el, true),
   restore: (el) => setArchived(el, false),
+  subscribe: openSubscribe,
+  'close-sub': closeSubscribe,
   delete: openDelete,
   reload: load,
 };
@@ -647,20 +806,22 @@ document.addEventListener('click', (event) => {
 
 form.addEventListener('submit', saveForm);
 $('#del-form').addEventListener('submit', confirmDelete);
+subForm.addEventListener('submit', saveSubscribe);
+subForm.addEventListener('input', onSubscribeInput);
+subForm.addEventListener('change', onSubscribeInput);
 $('#del-confirm').addEventListener('input', () => { $('#del-go').disabled = !deleteTyped(); });
 
 window.addEventListener('hashchange', () => {
   // A dialog belongs to the view it was opened from. While its request is in
   // flight it stays open (dialogBusy) and closes itself when the request ends.
-  closeForm();
-  closeDelete();
+  for (const close of Object.values(CLOSERS)) close();
   render();
   window.scrollTo(0, 0);
 });
 
 // Close a dialog on a click that starts and ends on its backdrop, so selecting
 // text in a field and releasing outside the dialog doesn't throw the form away.
-const CLOSERS = { 'svc-modal': closeForm, 'del-modal': closeDelete };
+const CLOSERS = { 'svc-modal': closeForm, 'del-modal': closeDelete, 'sub-modal': closeSubscribe };
 for (const [id, close] of Object.entries(CLOSERS)) {
   const overlay = document.getElementById(id);
   let downOnBackdrop = false;

@@ -238,7 +238,9 @@
   .modal-actions { display: flex; gap: 10px; margin-top: 12px; }
   .modal-actions .btn { padding: 10px 14px; font-size: 13px; }
   .modal-actions .btn-primary, .modal-actions .btn-danger { flex: 1; }
-  .del-warning { margin-bottom: 14px; }
+  .del-warning, .modal-lead { margin-bottom: 14px; }
+  .modal-lead strong { color: var(--text); font-weight: 600; }
+  .field-hint:empty { display: none; }
   .del-warning strong { color: var(--text); }
 
   /* ── toast ── */
@@ -391,6 +393,44 @@
       <div class="modal-actions">
         <button class="btn" type="button" data-action="close-delete">cancel</button>
         <button class="btn btn-danger" type="submit" id="del-go" disabled>delete forever</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Mark subscribed (SPEC §7.3): one period + its first charge, in one transaction ── -->
+<div class="overlay" id="sub-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sub-title">
+    <div class="modal-title">
+      <span id="sub-title">mark subscribed</span>
+      <button class="close-btn" type="button" data-action="close-sub" aria-label="close">×</button>
+    </div>
+    <form id="sub-form" novalidate autocomplete="off">
+      <p class="small muted modal-lead">
+        billed <strong id="sub-interval"></strong>. if that's wrong, edit the service first:
+        renewal dates and charges depend on it.
+      </p>
+      <div class="row2">
+        <div class="field">
+          <label for="sub-date">charged on</label>
+          <input id="sub-date" name="date" type="date">
+          <div class="field-error" data-for="date"></div>
+        </div>
+        <div class="field">
+          <label for="sub-amount">amount charged ($)</label>
+          <input id="sub-amount" name="amount" type="text" inputmode="decimal" placeholder="unknown">
+          <div class="field-error" data-for="amount"></div>
+        </div>
+      </div>
+      <div class="field" id="sub-setprice" hidden>
+        <label class="check"><input type="checkbox" name="set_price"> also set as current price</label>
+        <div class="field-hint">price on file: <span id="sub-price-now"></span>. ticking saves this amount, checked on this date.</div>
+      </div>
+      <div class="field-hint" id="sub-hint" aria-live="polite"></div>
+      <div class="modal-error" id="sub-error" role="alert"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-sub">cancel</button>
+        <button class="btn btn-primary" type="submit" id="sub-save">mark subscribed</button>
       </div>
     </form>
   </div>
