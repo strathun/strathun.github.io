@@ -158,8 +158,8 @@ test('planCatchUpAll returns work only for due, uncancelled periods (archived in
     period({ id: 'pd', service_id: 'c', started_on: '2026-05-01', renews_on: '2026-06-01', cancelled_on: '2026-05-01', access_ends_on: '2026-05-31' }),
   ];
   const work = planCatchUpAll({ services: [a, b, c], periods, today: TODAY });
-  assert.deepEqual(work.map((w) => [w.period_id, w.renews_on, w.charges.length]), [
-    ['pa', '2026-12-16', 1],
-    ['pb', '2026-12-01', 2],
+  assert.deepEqual(work.map((w) => [w.period_id, w.from_renews_on, w.renews_on, w.charges.length]), [
+    ['pa', TODAY, '2026-12-16', 1],
+    ['pb', '2026-10-01', '2026-12-01', 2],
   ]);
 });

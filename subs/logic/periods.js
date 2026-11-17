@@ -80,7 +80,11 @@ export function planCatchUp(period, service, today) {
   return { charges, renews_on: renewsOn };
 }
 
-/** Catch-up for every period that needs it: [{ period_id, renews_on, charges }]. */
+/**
+ * Catch-up for every period that needs it: [{ period_id, from_renews_on, renews_on, charges }].
+ * from_renews_on is the value it was planned from, so the data layer can advance
+ * renews_on only if no other tab has advanced it already.
+ */
 export function planCatchUpAll({ services, periods, today }) {
   const serviceById = new Map(services.map((s) => [s.id, s]));
   const work = [];
@@ -89,7 +93,7 @@ export function planCatchUpAll({ services, periods, today }) {
     if (!service) continue;
     for (const period of list) {
       const { charges, renews_on } = planCatchUp(period, service, today);
-      if (charges.length) work.push({ period_id: period.id, renews_on, charges });
+      if (charges.length) work.push({ period_id: period.id, from_renews_on: period.renews_on, renews_on, charges });
     }
   }
   return work;

@@ -20,6 +20,7 @@ import {
   renewalPending, cancelDefaults, cancelFromForm,
 } from './logic/entry.js';
 import { starterRows } from './logic/starter.js';
+import { planCatchUpAll } from './logic/periods.js';
 import * as db from './db.js';
 
 const state = {
@@ -28,6 +29,8 @@ const state = {
   periodsByService: new Map(),
   chargesByService: new Map(),
   showArchived: false,
+  /** Why the last catch-up failed, shown until a reload succeeds. */
+  catchUpError: null,
 };
 
 /** The service open in the form, or null when adding a new one. */
@@ -102,11 +105,41 @@ async function load() {
       </div>`;
     return;
   }
+  data = await catchUp(data);
   state.services = data.services;
   state.periodsByService = groupByService(data.periods);
   state.chargesByService = groupByService(data.charges);
   state.loaded = true;
   render();
+}
+
+/**
+ * Records renewals that came due since the last load (SPEC §7.3), then reloads so
+ * the page shows exactly what's stored. On failure, keeps the rows it has and
+ * shows why; the next load tries again and can't double-charge (acceptance 9).
+ */
+async function catchUp(data) {
+  state.catchUpError = null;
+  let inserted;
+  try {
+    const work = planCatchUpAll({ services: data.services, periods: data.periods, today: todayLocal() });
+    if (!work.length) return data;
+    inserted = await db.recordRenewals(work);
+  } catch (err) {
+    state.catchUpError = err.message;
+    return data;
+  }
+  // Count what was stored, not what was planned: another tab may have stored some first.
+  if (inserted.length) {
+    const names = [...new Set(inserted.map((c) => data.services.find((s) => s.id === c.service_id)?.name ?? 'a deleted service'))];
+    toast(`recorded ${inserted.length} renewal${inserted.length === 1 ? '' : 's'}: ${names.join(', ')}`);
+  }
+  try {
+    return await db.loadAll();
+  } catch (err) {
+    state.catchUpError = `renewals were recorded, but ${err.message}`;
+    return data;
+  }
 }
 
 function upsertLocal(row) {
@@ -149,6 +182,13 @@ function render() {
   const route = currentRoute();
   if (route.view === 'detail') renderDetail(route.id);
   else renderDashboard();
+  if (state.catchUpError) {
+    $('#view').insertAdjacentHTML('afterbegin', `
+      <div class="banner-error" role="alert">
+        <span>${esc(state.catchUpError)}</span>
+        <button class="btn" data-action="reload">try again</button>
+      </div>`);
+  }
 }
 
 // ── dashboard (SPEC §8.1) ───────────────────────────────────────────────────

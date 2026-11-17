@@ -105,6 +105,35 @@ export async function markSubscribed({ period, charge }, setPrice) {
 }
 
 /**
+ * Automatic renewal catch-up (SPEC §7.3) for planCatchUpAll()'s work.
+ *
+ * Charges go in first, then each period's renews_on advances. If the second step
+ * fails, the next load plans the same charges again and the unique index on
+ * (period_id, charged_on) skips the ones already stored. The other order could
+ * lose charges for good. renews_on only advances from the value it was planned
+ * from, so a second tab that got there first is left alone (acceptance 9).
+ * Resolves to the charges actually inserted: [{ id, service_id }].
+ */
+export async function recordRenewals(work) {
+  const what = 'record renewals';
+  const charges = work.flatMap((w) => w.charges);
+  const inserted = await window.sb
+    .from('charges')
+    .upsert(charges, { onConflict: 'period_id,charged_on', ignoreDuplicates: true })
+    .select('id, service_id');
+  const rows = unwrap(inserted, what) ?? [];
+  const advanced = await Promise.all(work.map((w) => window.sb
+    .from('periods')
+    .update({ renews_on: w.renews_on })
+    .eq('id', w.period_id)
+    .eq('renews_on', w.from_renews_on)
+    .select('id')));
+  // Zero rows means another tab advanced it first: not an error.
+  for (const res of advanced) unwrap(res, what);
+  return rows;
+}
+
+/**
  * Mark cancelled: sets cancelled_on and access_ends_on. Only a period that is still
  * uncancelled matches, so a second tab can't overwrite the first one's dates.
  */

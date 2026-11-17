@@ -10,20 +10,31 @@
 //   same error codes, and all-or-nothing writes.
 // - window.__fake hooks: tables, calls (every query made), blockWrites (updates and
 //   deletes return zero rows, like an RLS block), delay (ms before each response),
-//   rpcError ({ code, message }: the next rpc fails with it and writes nothing).
+//   rpcError ({ code, message }: the next rpc fails with it and writes nothing),
+//   failNext ({ table, op, code, message }: the next matching query fails). To fail
+//   a query that runs during page load, put failNext JSON in localStorage '__failNext'.
+// - upsert(rows, { onConflict, ignoreDuplicates: true }) skips rows that match an
+//   existing row on the onConflict columns, like insert ... on conflict do nothing.
 // - Unknown query methods (gte, in, limit, …) are accepted and ignored, so other pages load.
 (function () {
   const tables = { services: [], periods: [], charges: [], watchlist_items: [] };
   let seq = 0;
-  const fake = (window.__fake = { tables, blockWrites: false, calls: [] });
+  const fake = (window.__fake = { tables, blockWrites: false, calls: [], failNext: null });
   const seed = JSON.parse(localStorage.getItem('__seed') || 'null');
   if (seed) Object.assign(tables, seed);
+  fake.failNext = JSON.parse(localStorage.getItem('__failNext') || 'null');
+  localStorage.removeItem('__failNext');
 
   function builder(table) {
-    let op = 'select', payload = null, filters = [], wantRows = false;
+    let op = 'select', payload = null, filters = [], wantRows = false, conflict = null;
     const b = {
       select() { if (op === 'select') op = 'select'; else wantRows = true; return b; },
       insert(rows) { op = 'insert'; payload = Array.isArray(rows) ? rows : [rows]; return b; },
+      upsert(rows, opts = {}) {
+        op = 'upsert'; payload = Array.isArray(rows) ? rows : [rows];
+        conflict = opts.ignoreDuplicates ? String(opts.onConflict ?? 'id').split(',') : null;
+        return b;
+      },
       update(row) { op = 'update'; payload = row; return b; },
       delete() { op = 'delete'; return b; },
       eq(col, val) { filters.push([col, val]); return b; },
@@ -40,6 +51,18 @@
     function run() {
       fake.calls.push({ table, op, payload, filters });
       const rows = (tables[table] ??= []);
+      const f = fake.failNext;
+      if (f && f.table === table && f.op === op) {
+        fake.failNext = null;
+        return { data: null, error: { code: f.code, message: f.message } };
+      }
+      if (op === 'upsert') {
+        if (!conflict) return { data: null, error: { code: 'FAKE', message: 'the fake only supports upsert with ignoreDuplicates' } };
+        const fresh = payload.filter((r) => !rows.some((x) => conflict.every((c) => x[c] === r[c])));
+        const out = fresh.map((r) => ({ id: `${table}-${++seq}`, ...r }));
+        rows.push(...out);
+        return { data: out.map((r) => ({ ...r })), error: null };
+      }
       if (op === 'select') return { data: rows.map((r) => ({ ...r })), error: null };
       if (op === 'insert') {
         for (const r of payload) {
