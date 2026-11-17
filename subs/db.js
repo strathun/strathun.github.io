@@ -144,6 +144,13 @@ export async function recordRenewals(work) {
   return rows;
 }
 
+/** Edit charge (SPEC §8.3): amount and/or date. */
+export async function updateCharge(id, row) {
+  const what = 'save the charge';
+  const res = await window.sb.from('charges').update(row).eq('id', id).select();
+  return one(unwrap(res, what, { [UNIQUE_VIOLATION]: 'this period already has a charge on that date' }), what);
+}
+
 /**
  * Mark cancelled: sets cancelled_on and access_ends_on. Only a period that is still
  * uncancelled matches, so a second tab can't overwrite the first one's dates.

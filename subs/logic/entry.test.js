@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {
   setPriceOption, subscribeDefaults, subscribeFromForm,
   renewalPending, cancelDefaults, cancelFromForm,
+  chargeDefaults, chargeSetPriceOption, chargeFromForm,
 } from './entry.js';
-import { svc, period, TODAY } from './fixtures.js';
+import { svc, period, charge, TODAY } from './fixtures.js';
 
 // ── Also set as current price ───────────────────────────────────────────────
 
@@ -187,4 +188,68 @@ test('cancelFromForm: a bad access date is reported', () => {
 test('cancelFromForm: an already cancelled period is refused', () => {
   const done = { ...current, cancelled_on: TODAY, access_ends_on: '2026-12-15' };
   assert.match(cancelFromForm({ cancelled_on: TODAY, access_ends_on: '' }, { period: done, today: TODAY }).errors.form, /already cancelled/);
+});
+
+// ── Edit charge ─────────────────────────────────────────────────────────────
+
+const spotify = svc({ id: 'sp', price_cents: 1199 });
+const renewal = charge({ id: 'c2', service_id: 'sp', period_id: 'p1', charged_on: '2026-10-20', amount_cents: 1199, source: 'auto' });
+const first = charge({ id: 'c1', service_id: 'sp', period_id: 'p1', charged_on: '2026-09-20', amount_cents: 1199 });
+const ctx = { charge: renewal, service: spotify, siblings: [first, renewal], today: TODAY };
+
+test('chargeDefaults: the charge as the form shows it', () => {
+  assert.deepEqual(chargeDefaults(renewal), { charged_on: '2026-10-20', amount: '11.99', set_price: false });
+  assert.deepEqual(chargeDefaults({ ...renewal, amount_cents: null }), { charged_on: '2026-10-20', amount: '', set_price: false });
+});
+
+test('chargeSetPriceOption: only once the amount changes, then like Mark subscribed', () => {
+  assert.deepEqual(chargeSetPriceOption(renewal, spotify, 1199), { show: false, checked: false });
+  assert.deepEqual(chargeSetPriceOption(renewal, spotify, 1299), { show: true, checked: false });
+  // changed, but back to the price on file: nothing to save
+  assert.deepEqual(chargeSetPriceOption({ ...renewal, amount_cents: 999 }, spotify, 1199), { show: false, checked: false });
+  // unknown price: ticked
+  assert.deepEqual(chargeSetPriceOption(renewal, svc({ price_cents: null }), 1299), { show: true, checked: true });
+  // unknown amount filled in
+  assert.deepEqual(chargeSetPriceOption({ ...renewal, amount_cents: null }, spotify, 1299), { show: true, checked: false });
+});
+
+test('chargeFromForm: §9 keeper price rise: new amount plus set as current price', () => {
+  const r = chargeFromForm({ charged_on: '2026-10-20', amount: '12.99', set_price: true }, ctx);
+  assert.deepEqual(r, {
+    row: { amount_cents: 1299 },
+    price: { price_cents: 1299, price_checked_on: '2026-10-20' },
+    errors: {},
+  });
+});
+
+test('chargeFromForm: only changed columns are written; nothing changed → null', () => {
+  assert.deepEqual(chargeFromForm(chargeDefaults(renewal), ctx), { row: null, price: null, errors: {} });
+  assert.deepEqual(chargeFromForm({ charged_on: '2026-10-21', amount: '11.99' }, ctx).row, { charged_on: '2026-10-21' });
+});
+
+test('chargeFromForm: the price is dated to the (new) charge date', () => {
+  const r = chargeFromForm({ charged_on: '2026-10-22', amount: '13', set_price: true }, ctx);
+  assert.deepEqual(r.price, { price_cents: 1300, price_checked_on: '2026-10-22' });
+});
+
+test('chargeFromForm: a tick that is not offered is ignored', () => {
+  assert.equal(chargeFromForm({ charged_on: '2026-10-21', amount: '11.99', set_price: true }, ctx).price, null);
+});
+
+test('chargeFromForm: blank amount records unknown', () => {
+  assert.deepEqual(chargeFromForm({ charged_on: '2026-10-20', amount: '' }, ctx).row, { amount_cents: null });
+});
+
+test('chargeFromForm: two charges in one period cannot share a date', () => {
+  const r = chargeFromForm({ charged_on: '2026-09-20', amount: '11.99' }, ctx);
+  assert.equal(r.errors.charged_on, 'this period already has a charge on that date');
+  // a charge in no period has nothing to collide with
+  const loose = { ...renewal, period_id: null };
+  assert.deepEqual(chargeFromForm({ charged_on: '2026-09-20', amount: '11.99' }, { ...ctx, charge: loose }).errors, {});
+});
+
+test('chargeFromForm: date and amount are validated', () => {
+  const r = chargeFromForm({ charged_on: '2026-11-17', amount: 'x' }, ctx);
+  assert.deepEqual(r.errors, { charged_on: "can't be in the future", amount: 'enter a price like 12.99' });
+  assert.equal(r.row, null);
 });

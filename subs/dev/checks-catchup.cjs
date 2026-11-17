@@ -93,7 +93,7 @@ const renews = (t, id) => t.periods.find((p) => p.id === id).renews_on;
     await page.click('.service-row:has-text("Spotify")');
     await page.waitForSelector('.history');
     const rows = await page.$$eval('.history .charge', (cs) => cs.map((c) => c.textContent.replace(/\s+/g, ' ').trim()));
-    check('detail lists the auto charges, newest first', JSON.stringify(rows) === JSON.stringify(['nov 16 $11.99 / mo auto', 'oct 16 $11.99 / mo auto', 'sep 16 $11.99 / mo auto', 'aug 16 $11.99 / mo']), JSON.stringify(rows));
+    check('detail lists the auto charges, newest first', JSON.stringify(rows) === JSON.stringify(['nov 16 $11.99 / mo auto edit', 'oct 16 $11.99 / mo auto edit', 'sep 16 $11.99 / mo auto edit', 'aug 16 $11.99 / mo edit']), JSON.stringify(rows));
     check('detail: renews dec 16', (await page.textContent('.detail-status')).trim() === 'active · renews dec 16');
 
     // 2. reload: nothing more to do (acceptance 9)

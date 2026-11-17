@@ -139,6 +139,7 @@
   .period-delete { margin: 0; padding: 0; font-size: 11px; flex-shrink: 0; }
   .period-delete:hover { color: var(--danger); }
   #delp-charges { margin: 0 0 14px; }
+  .charge-edit { margin: 0; padding: 0; font-size: 11px; }
   .charge-list { list-style: none; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
   .charge {
     display: grid; grid-template-columns: 8.5em minmax(0, 1fr) auto; gap: 8px; align-items: center;
@@ -505,6 +506,40 @@
       <div class="modal-actions">
         <button class="btn" type="button" data-action="close-delp">keep it</button>
         <button class="btn btn-danger" type="submit" id="delp-go">delete period</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Edit charge (SPEC §8.3): amount and date, optionally saving the amount as the price ── -->
+<div class="overlay" id="chg-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="chg-title">
+    <div class="modal-title">
+      <span id="chg-title">edit charge</span>
+      <button class="close-btn" type="button" data-action="close-chg" aria-label="close">×</button>
+    </div>
+    <form id="chg-form" novalidate autocomplete="off">
+      <p class="small muted modal-lead" id="chg-lead"></p>
+      <div class="row2">
+        <div class="field">
+          <label for="chg-date">charged on</label>
+          <input id="chg-date" name="charged_on" type="date">
+          <div class="field-error" data-for="charged_on"></div>
+        </div>
+        <div class="field">
+          <label for="chg-amount">amount ($)</label>
+          <input id="chg-amount" name="amount" type="text" inputmode="decimal" placeholder="unknown">
+          <div class="field-error" data-for="amount"></div>
+        </div>
+      </div>
+      <div class="field" id="chg-setprice" hidden>
+        <label class="check"><input type="checkbox" name="set_price"> also set as current price</label>
+        <div class="field-hint">price on file: <span id="chg-price-now"></span>. ticking saves this amount, checked on this charge's date, so later renewals use it.</div>
+      </div>
+      <div class="modal-error" id="chg-error" role="alert"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-chg">cancel</button>
+        <button class="btn btn-primary" type="submit" id="chg-save">save</button>
       </div>
     </form>
   </div>

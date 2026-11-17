@@ -18,6 +18,7 @@ import { periodHistory, chargeTotal } from './logic/history.js';
 import {
   setPriceOption, subscribeDefaults, subscribeFromForm,
   renewalPending, cancelDefaults, cancelFromForm,
+  chargeDefaults, chargeSetPriceOption, chargeFromForm,
 } from './logic/entry.js';
 import { starterRows } from './logic/starter.js';
 import { planCatchUpAll } from './logic/periods.js';
@@ -473,7 +474,7 @@ function periodHeadHtml(entry, today) {
     </span> ${del}`;
 }
 
-function chargeHtml(charge, today) {
+function chargeHtml(charge, today, { editable = false } = {}) {
   const amount = charge.amount_cents == null
     ? `<span class="charge-amount unknown">amount unknown</span>`
     : `<span class="charge-amount">${esc(formatCents(charge.amount_cents))}</span>`;
@@ -481,16 +482,19 @@ function chargeHtml(charge, today) {
   const auto = charge.source === 'auto'
     ? `<span class="badge badge-muted" title="recorded automatically on the renewal date">auto</span>`
     : '';
+  const edit = editable
+    ? ` <button class="link-btn charge-edit" data-action="edit-charge" data-id="${esc(charge.id)}" data-service="${esc(charge.service_id)}" aria-label="edit the ${esc(formatDay(charge.charged_on, today))} charge">edit</button>`
+    : '';
   return `
     <li class="charge">
       <span class="charge-date">${esc(formatDay(charge.charged_on, today))}</span>
-      <span class="charge-what">${amount}<span class="muted"> / ${esc(interval)}</span> ${auto}</span>
+      <span class="charge-what">${amount}<span class="muted"> / ${esc(interval)}</span> ${auto}</span>${edit}
     </li>`;
 }
 
 function chargeListHtml(charges, today) {
   if (!charges.length) return `<p class="muted small charge-none">no charges</p>`;
-  return `<ul class="charge-list">${charges.map((c) => chargeHtml(c, today)).join('')}</ul>`;
+  return `<ul class="charge-list">${charges.map((c) => chargeHtml(c, today, { editable: true })).join('')}</ul>`;
 }
 
 function historyHtml(service, today) {
@@ -909,6 +913,111 @@ async function saveCancel(event) {
   });
 }
 
+// ── edit charge (SPEC §8.3, §9 keeper renewal) ──────────────────────────────
+
+const chgForm = $('#chg-form');
+const chgField = (name) => chgForm.elements.namedItem(name);
+/** { service, charge } in the Edit charge dialog. */
+let editingCharge = null;
+let chgSetPriceTouched = false;
+
+function openEditCharge(button) {
+  const service = findService(button.dataset.service);
+  const charge = chargesOf(button.dataset.service).find((c) => c.id === button.dataset.id);
+  if (!service || !charge) {
+    toast('that charge is gone. reload the page.', { error: true });
+    return;
+  }
+  editingCharge = { service, charge };
+  chgSetPriceTouched = false;
+  const today = todayLocal();
+  const values = chargeDefaults(charge);
+  chgField('charged_on').value = values.charged_on;
+  chgField('charged_on').max = today;
+  chgField('amount').value = values.amount;
+  chgField('set_price').checked = values.set_price;
+  $('#chg-title').textContent = `${service.name} charge, ${formatDay(charge.charged_on, today)}`;
+  $('#chg-lead').textContent = charge.source === 'auto'
+    ? 'recorded automatically on the renewal date, at the price on file. make it match your statement.'
+    : 'make it match your statement.';
+  markErrors(chgForm, {});
+  updateChargeHints();
+  openModal('chg-modal');
+  chgField('amount').focus();
+}
+
+function closeEditCharge() {
+  if (closeModal('chg-modal')) editingCharge = null;
+}
+
+function readCharge() {
+  return { charged_on: chgField('charged_on').value, amount: chgField('amount').value, set_price: chgField('set_price').checked };
+}
+
+function updateChargeHints() {
+  if (!editingCharge) return;
+  const { service, charge } = editingCharge;
+  const amount = parseCents(chgField('amount').value);
+  const option = chargeSetPriceOption(charge, service, amount.error ? null : amount.value);
+  $('#chg-setprice').hidden = !option.show;
+  if (!chgSetPriceTouched) chgField('set_price').checked = option.checked;
+  $('#chg-price-now').textContent = service.price_cents == null ? 'unknown' : formatPrice(service);
+}
+
+function onChargeInput(event) {
+  if (event.target.name === 'set_price') chgSetPriceTouched = true;
+  updateChargeHints();
+}
+
+/**
+ * Saves the price first, then the charge. They aren't one transaction (SPEC §6
+ * names only Mark subscribed and Delete period), so the order keeps a retry clean:
+ * if the charge fails, saving again finds the price already set and only retries
+ * the charge. A new price with an old charge amount is harmless meanwhile.
+ */
+async function saveCharge(event) {
+  event.preventDefault();
+  if (!editingCharge || dialogBusy) return;
+  const { service, charge } = editingCharge;
+  const { row, price, errors } = chargeFromForm(readCharge(), {
+    charge, service, siblings: chargesOf(service.id), today: todayLocal(),
+  });
+  markErrors(chgForm, errors);
+  const firstBad = Object.keys(errors).find((k) => k !== 'form');
+  if (firstBad) {
+    chgField(firstBad).focus();
+    return;
+  }
+  if (!row && !price) {
+    closeEditCharge();
+    return;
+  }
+
+  await submitDialog('chg-modal', $('#chg-save'), 'saving…', async () => {
+    if (price) {
+      upsertLocal(await db.updateService(service.id, price, 'update the price'));
+      editingCharge.service = findService(service.id);
+    }
+    if (row) {
+      try {
+        const saved = await db.updateCharge(charge.id, row);
+        putRow(state.chargesByService, saved);
+      } catch (err) {
+        if (price) {
+          render(); // show the new price behind the dialog
+          updateChargeHints(); // the price is saved: a retry only needs the charge
+          err.message = `price updated, but ${err.message}`;
+        }
+        throw err;
+      }
+    }
+    return () => {
+      render();
+      toast(price ? `saved the charge and set ${service.name}'s price` : 'saved the charge');
+    };
+  });
+}
+
 // ── delete period (SPEC §8.3) ───────────────────────────────────────────────
 
 /** { service, entry } in the Delete period dialog; entry is a periodHistory() entry. */
@@ -997,6 +1106,8 @@ const ACTIONS = {
   'close-cancel': closeCancel,
   'delete-period': openDeletePeriod,
   'close-delp': closeDeletePeriod,
+  'edit-charge': openEditCharge,
+  'close-chg': closeEditCharge,
   delete: openDelete,
   reload: load,
 };
@@ -1013,6 +1124,9 @@ subForm.addEventListener('input', onSubscribeInput);
 subForm.addEventListener('change', onSubscribeInput);
 cancelForm.addEventListener('submit', saveCancel);
 $('#delp-form').addEventListener('submit', confirmDeletePeriod);
+chgForm.addEventListener('submit', saveCharge);
+chgForm.addEventListener('input', onChargeInput);
+chgForm.addEventListener('change', onChargeInput);
 $('#del-confirm').addEventListener('input', () => { $('#del-go').disabled = !deleteTyped(); });
 
 window.addEventListener('hashchange', () => {
@@ -1027,7 +1141,7 @@ window.addEventListener('hashchange', () => {
 // text in a field and releasing outside the dialog doesn't throw the form away.
 const CLOSERS = {
   'svc-modal': closeForm, 'del-modal': closeDelete, 'sub-modal': closeSubscribe, 'cancel-modal': closeCancel,
-  'delp-modal': closeDeletePeriod,
+  'delp-modal': closeDeletePeriod, 'chg-modal': closeEditCharge,
 };
 for (const [id, close] of Object.entries(CLOSERS)) {
   const overlay = document.getElementById(id);

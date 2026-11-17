@@ -126,3 +126,48 @@ export function cancelFromForm(values, { period, today }) {
   if (Object.keys(errors).length) return { row: null, errors };
   return { row: planCancel(period, date.value, accessEndsOn), errors };
 }
+
+// ── Edit charge ─────────────────────────────────────────────────────────────
+
+/** Form values for a charge. */
+export function chargeDefaults(charge) {
+  return { charged_on: charge.charged_on, amount: centsToInput(charge.amount_cents), set_price: false };
+}
+
+/**
+ * "Also set as current price" when editing a charge (SPEC §8.3): only once the
+ * amount has changed, and then by the same rule as Mark subscribed.
+ */
+export function chargeSetPriceOption(charge, service, amountCents) {
+  if (amountCents === (charge.amount_cents ?? null)) return { show: false, checked: false };
+  return setPriceOption(service, amountCents);
+}
+
+/**
+ * Edit charge form → { row, price, errors }.
+ * `row` holds only the changed columns (charged_on, amount_cents), or null if
+ * nothing changed. `price` is { price_cents, price_checked_on } to save on the
+ * service, dated to the charge, when the option is offered and ticked; else null.
+ * `siblings` are the other charges of the same period: two can't share a date.
+ */
+export function chargeFromForm(values, { charge, service, siblings = [], today }) {
+  const errors = {};
+  const date = dateField(values.charged_on, today);
+  if (date.error) errors.charged_on = date.error;
+  else if (charge.period_id != null && siblings.some((c) => c.id !== charge.id && c.period_id === charge.period_id && c.charged_on === date.value)) {
+    errors.charged_on = 'this period already has a charge on that date';
+  }
+  const amount = parseCents(values.amount);
+  if (amount.error) errors.amount = amount.error;
+  if (Object.keys(errors).length) return { row: null, price: null, errors };
+
+  const row = {};
+  if (date.value !== charge.charged_on) row.charged_on = date.value;
+  if (amount.value !== (charge.amount_cents ?? null)) row.amount_cents = amount.value;
+  const setPrice = chargeSetPriceOption(charge, service, amount.value).show && !!values.set_price;
+  return {
+    row: Object.keys(row).length ? row : null,
+    price: setPrice ? { price_cents: amount.value, price_checked_on: date.value } : null,
+    errors,
+  };
+}
