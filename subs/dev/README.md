@@ -47,6 +47,7 @@ npx playwright install chromium
 | `checks-catchup.cjs` | renewal catch-up on load: what's charged, reloads, half-finished runs, failure banner |
 | `checks-delete-period.cjs` | delete period: the confirmation, what's removed (acceptance 18), failures |
 | `checks-charges.cjs` | edit charge: amount, date, set-as-price, partial failures and retries |
+| `checks-alerts.cjs` | dashboard alerts: order, text, acting in place (acceptance 20), an older open period (acceptance 19) |
 | `supabase-stub.sql` | roles, `auth.users` and `auth.uid()`: enough Supabase for plain Postgres |
 | `sql-check.sh` | runs `schema.sql`, `migrations/*.sql` and `rls-test.sql` on a local Postgres |
 

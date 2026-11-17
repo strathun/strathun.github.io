@@ -40,6 +40,17 @@ export function period(over = {}) {
   };
 }
 
+/**
+ * SPEC §7.1, acceptance 19: a Mar 1 backfill left uncancelled (caught up to a
+ * Dec 1 renewal) behind a June rotation that was cancelled. Returns [open, later].
+ */
+export function openBehindCancelled(service_id = 'svc-x') {
+  return [
+    period({ service_id, started_on: '2026-03-01', renews_on: '2026-12-01' }),
+    period({ service_id, started_on: '2026-06-01', renews_on: '2026-07-01', cancelled_on: '2026-06-01', access_ends_on: '2026-06-30' }),
+  ];
+}
+
 export function charge(over = {}) {
   return {
     id: nextId('chg'),

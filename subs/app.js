@@ -21,6 +21,7 @@ import {
   chargeDefaults, chargeSetPriceOption, chargeFromForm,
 } from './logic/entry.js';
 import { starterRows } from './logic/starter.js';
+import { dashboardAlerts } from './logic/alerts.js';
 import { planCatchUpAll } from './logic/periods.js';
 import * as db from './db.js';
 
@@ -267,7 +268,76 @@ function renderDashboard() {
     ? `<button class="link-btn" data-action="show-checklist">show setup checklist</button>`
     : '';
 
-  $('#view').innerHTML = header + checklist + sections + none + archived + reopen;
+  $('#view').innerHTML = header + alertsHtml(today) + checklist + sections + none + archived + reopen;
+}
+
+// ── alerts (SPEC §7.2, §8.1) ────────────────────────────────────────────────
+
+/** "the mar 1 period was never cancelled", when the renewing period isn't the latest (§7.1). */
+const olderText = (alert, today) =>
+  alert.olderStart ? ` · the ${formatDay(alert.olderStart, today)} period was never cancelled` : '';
+
+function alertParts({ service, alert }, today) {
+  if (alert.type === 'cancel_now') {
+    const next = alert.renewsOn ? `next charge ${formatDay(alert.renewsOn, today)}` : 'still renewing';
+    return { tag: 'cancel now', text: next + olderText(alert, today) };
+  }
+  if (alert.type === 'decide_by') {
+    // Non-breaking, so "$21.00 / yr" never wraps before "yr" at phone width.
+    const at = service.price_cents == null ? '' : ` at ${formatPrice(service).replace(/ /g, '\u00a0')}`;
+    const renews = `renews ${formatDay(alert.renewsOn, today)}${at}`;
+    return {
+      tag: `decide by ${formatDay(alert.date, today)}`,
+      text: (alert.overdue ? `that date has passed · ${renews}` : renews) + olderText(alert, today),
+    };
+  }
+  const n = alert.count;
+  return { tag: 'amount unknown', text: `${n} charge${n === 1 ? ' has' : 's have'} no amount` };
+}
+
+/**
+ * Act on the alert in place: the manage page, then Mark cancelled (§8.1). An older
+ * period left open usually ended long ago and may have renewals recorded since, which
+ * Delete period removes: send it to the history, where both options are.
+ * Accessible names start with the visible label, so voice control can say it (WCAG 2.5.3).
+ */
+function alertActionsHtml({ service, alert }) {
+  const name = esc(service.name);
+  if (alert.type === 'amount_unknown') {
+    return `<a class="btn btn-sm" href="${detailHref(service.id)}" aria-label="edit charges: ${name}">edit charges</a>`;
+  }
+  if (alert.olderStart) {
+    return `<a class="btn btn-sm" href="${detailHref(service.id)}" aria-label="review periods: ${name}">review periods</a>`;
+  }
+  const manage = isWebUrl(service.manage_url)
+    ? `<a class="btn btn-sm" href="${esc(service.manage_url)}" target="_blank" rel="noopener noreferrer" aria-label="manage: ${name}, opens in a new tab">manage ↗</a>`
+    : '';
+  return `${manage}<button class="btn btn-sm" data-action="cancel" data-id="${esc(service.id)}" aria-label="mark cancelled: ${name}">mark cancelled</button>`;
+}
+
+function alertsHtml(today) {
+  const entries = dashboardAlerts({
+    services: state.services,
+    periodsByService: state.periodsByService,
+    chargesByService: state.chargesByService,
+    today,
+  });
+  if (!entries.length) return '';
+  const items = entries.map((entry) => {
+    const { tag, text } = alertParts(entry, today);
+    return `
+      <li class="alert${entry.alert.overdue ? ' is-overdue' : ''}">
+        <a class="alert-name" href="${detailHref(entry.service.id)}">${esc(entry.service.name)}</a>
+        <span class="badge badge-warn">${esc(tag)}</span>
+        <p class="alert-text">${esc(text)}</p>
+        <div class="alert-actions">${alertActionsHtml(entry)}</div>
+      </li>`;
+  });
+  return `
+    <section class="alerts" aria-labelledby="alerts-title">
+      <h2 class="group-title" id="alerts-title">alerts<small>${entries.length}</small></h2>
+      <ul class="alert-list">${items.join('')}</ul>
+    </section>`;
 }
 
 // ── setup checklist (SPEC §11) ──────────────────────────────────────────────
@@ -405,15 +475,14 @@ function renderDetail(id) {
       <button class="btn" data-action="restore" data-id="${esc(service.id)}">restore</button>
       <button class="btn btn-danger" data-action="delete" data-id="${esc(service.id)}">delete permanently…</button>`;
   } else {
-    // At most one uncancelled period (SPEC §6): while it exists, Mark subscribed is off (acceptance 7).
+    // At most one uncancelled period (SPEC §6): while it exists, Mark subscribed is off (acceptance 7),
+    // and the service is renewing (§7.1), so Archive is off too.
     const open = openPeriod(periodsOf(service.id));
     const allowed = canArchive(status.status);
     const id = esc(service.id);
-    const hint = !open
-      ? ''
-      : allowed
-        ? 'a period is still renewing. mark it cancelled before subscribing again.'
-        : "still renewing. mark it cancelled before subscribing again or archiving, so its charges can't continue unseen.";
+    const hint = open
+      ? "still renewing. mark it cancelled before subscribing again or archiving, so its charges can't continue unseen."
+      : '';
     const off = 'disabled aria-describedby="actions-hint"';
     actions = `
       ${open ? `<button class="btn btn-primary" data-action="cancel" data-id="${id}">mark cancelled</button>` : ''}
@@ -896,7 +965,7 @@ async function saveCancel(event) {
   const { service, period } = cancelling;
   const today = todayLocal();
   const values = { cancelled_on: cancelField('cancelled_on').value, access_ends_on: cancelField('access_ends_on').value };
-  const { row, errors } = cancelFromForm(values, { period, today });
+  const { row, errors } = cancelFromForm(values, { period, charges: chargesOf(service.id), today });
   markErrors(cancelForm, errors);
   const firstBad = Object.keys(errors).find((k) => k !== 'form');
   if (firstBad) cancelField(firstBad).focus();

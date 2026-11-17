@@ -190,6 +190,32 @@ test('cancelFromForm: an already cancelled period is refused', () => {
   assert.match(cancelFromForm({ cancelled_on: TODAY, access_ends_on: '' }, { period: done, today: TODAY }).errors.form, /already cancelled/);
 });
 
+// A Mar 1 backfill left open, caught up to Dec 1: renewals Apr 1 … Nov 1 are recorded (SPEC §7.3).
+const caughtUp = period({ id: 'p3', started_on: '2026-03-01', renews_on: '2026-12-01' });
+const caughtUpCharges = ['2026-03-01', '2026-04-01', '2026-11-01'].map((d) => charge({ period_id: 'p3', charged_on: d }));
+
+test('cancelFromForm: refuses a date before a charge the period already has', () => {
+  const at = (d, charges = caughtUpCharges) =>
+    cancelFromForm({ cancelled_on: d, access_ends_on: '' }, { period: caughtUp, charges, today: TODAY }).errors.cancelled_on;
+  assert.equal(at('2026-03-01'), 'it was charged on nov 1, so it was still renewing then. if it really ended earlier, delete the period and record it again');
+  assert.equal(at('2026-10-31'), at('2026-03-01'));
+  assert.equal(at('2026-11-01'), undefined); // cancelling on the day of the last charge is fine
+  assert.equal(at(TODAY), undefined);
+});
+
+test("cancelFromForm: only this period's charges count", () => {
+  const other = [charge({ period_id: 'elsewhere', charged_on: '2026-11-10' }), charge({ period_id: 'p3', charged_on: '2026-03-01' })];
+  const r = cancelFromForm({ cancelled_on: '2026-03-01', access_ends_on: '2026-03-31' }, { period: caughtUp, charges: other, today: TODAY });
+  assert.deepEqual(r.errors, {});
+});
+
+test('cancelFromForm: day-one cancel of a fresh period passes the charge check', () => {
+  const r = cancelFromForm(cancelDefaults(backfill, TODAY), {
+    period: backfill, charges: [charge({ period_id: 'p2', charged_on: '2026-03-01' })], today: TODAY,
+  });
+  assert.deepEqual(r.errors, {});
+});
+
 // ── Edit charge ─────────────────────────────────────────────────────────────
 
 const spotify = svc({ id: 'sp', price_cents: 1199 });
