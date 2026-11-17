@@ -37,8 +37,8 @@ strathun.github.io/
 │   ├── package.json     # Marks subs/ as ES modules for node --test; not a build
 │   ├── index.html       # Markup + styles; loads app.js as a module
 │   ├── app.js           # Rendering, hash routes (#/ dashboard, #/s/{id} detail), events
-│   ├── db.js            # Supabase calls; throws DbError so the page can show it
-│   ├── logic/           # Pure logic (SPEC §7, service form, starter list) + *.test.js, no DOM or Supabase
+│   ├── db.js            # Supabase calls (rpc for the migration 002 functions); throws DbError so the page can show it
+│   ├── logic/           # Pure logic (SPEC §7, service/period/charge forms, starter list) + *.test.js, no DOM or Supabase
 │   └── dev/             # Browser checks: Playwright + a fake in-memory Supabase (see its README)
 ├── runs/                # Public share pages (see "Public pages" below)
 │   ├── dead-horse/      # Dead Horse 50K training map: index.html + routes.json
