@@ -235,3 +235,9 @@ export function serviceBadges(service, today) {
 export function canArchive(status) {
   return status !== 'renewing';
 }
+
+/** Setup checklist item 1 (SPEC §11): how many non-archived services have a price. */
+export function setupProgress(services) {
+  const live = services.filter((s) => !s.archived_at);
+  return { priced: live.filter((s) => s.price_cents != null).length, total: live.length };
+}

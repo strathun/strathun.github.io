@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   parseCents, formatCents, centsToInput, formatPrice, isWebUrl,
   formValues, serviceFromForm, findNameConflict, groupServices,
-  serviceBadges, canArchive, NEW_SERVICE, SERVICE_FIELDS,
+  serviceBadges, canArchive, setupProgress, NEW_SERVICE, SERVICE_FIELDS,
 } from './services.js';
 import { groupByService } from './status.js';
 import { svc, period, TODAY } from './fixtures.js';
@@ -256,4 +256,18 @@ test('canArchive: not while renewing (SPEC §8.4)', () => {
   assert.equal(canArchive('renewing'), false);
   assert.equal(canArchive('ending'), true);
   assert.equal(canArchive('inactive'), true);
+});
+
+test('setupProgress counts priced services, ignoring archived ones', () => {
+  assert.deepEqual(setupProgress([]), { priced: 0, total: 0 });
+  assert.deepEqual(
+    setupProgress([
+      svc({ price_cents: 1500 }),
+      svc({ price_cents: 0 }), // free is still a known price
+      svc({ price_cents: null }),
+      svc({ price_cents: null, archived_at: '2026-06-01T00:00:00+00:00' }),
+      svc({ price_cents: 999, archived_at: '2026-06-01T00:00:00+00:00' }),
+    ]),
+    { priced: 2, total: 3 },
+  );
 });

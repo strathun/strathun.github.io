@@ -63,3 +63,9 @@ export async function deleteService(id) {
   const res = await window.sb.from('services').delete().eq('id', id).select('id');
   return one(unwrap(res, 'delete the service'), 'delete the service');
 }
+
+/** One bulk insert is one statement: all rows go in, or none do. */
+export async function insertServices(rows) {
+  const res = await window.sb.from('services').insert(rows).select();
+  return unwrap(res, 'load the starter list');
+}

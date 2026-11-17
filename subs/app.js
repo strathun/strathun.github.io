@@ -12,8 +12,9 @@ import { todayLocal, formatDay } from './logic/dates.js';
 import { groupByService, serviceStatus } from './logic/status.js';
 import {
   CATEGORIES, INTERVALS, formatPrice, formValues, serviceFromForm,
-  findNameConflict, groupServices, serviceBadges, canArchive, isWebUrl,
+  findNameConflict, groupServices, serviceBadges, canArchive, isWebUrl, setupProgress,
 } from './logic/services.js';
+import { starterRows } from './logic/starter.js';
 import * as db from './db.js';
 
 const state = {
@@ -54,6 +55,18 @@ async function busy(button, fn) {
   } finally {
     if (button?.isConnected) button.disabled = false;
   }
+}
+
+// Per-device convenience only (SPEC §11): storage can be blocked, so never rely on it.
+const CHECKLIST_KEY = 'subs.checklistDismissed';
+function checklistDismissed() {
+  try { return localStorage.getItem(CHECKLIST_KEY) === '1'; } catch { return false; }
+}
+function setChecklistDismissed(dismissed) {
+  try {
+    if (dismissed) localStorage.setItem(CHECKLIST_KEY, '1');
+    else localStorage.removeItem(CHECKLIST_KEY);
+  } catch { /* the checklist just reappears next visit */ }
 }
 
 const findService = (id) => state.services.find((s) => s.id === id) ?? null;
@@ -151,7 +164,11 @@ function renderDashboard() {
     $('#view').innerHTML = `${header}
       <div class="empty">
         <p>no services yet.</p>
-        <p><button class="btn btn-primary" data-action="add">+ add service</button></p>
+        <p>the starter list adds 13 common services with their manage links. prices start blank.</p>
+        <p class="empty-actions">
+          <button class="btn btn-primary" data-action="load-starter">load starter list</button>
+          <button class="btn" data-action="add">add one yourself</button>
+        </p>
       </div>`;
     return;
   }
@@ -170,7 +187,64 @@ function renderDashboard() {
       ${state.showArchived ? groupHtml('archived', groups.archived, today, 'is-archived') : ''}`;
   }
 
-  $('#view').innerHTML = header + sections + none + archived;
+  const dismissed = checklistDismissed();
+  const checklist = dismissed ? '' : checklistHtml();
+  const reopen = dismissed
+    ? `<button class="link-btn" data-action="show-checklist">show setup checklist</button>`
+    : '';
+
+  $('#view').innerHTML = header + checklist + sections + none + archived + reopen;
+}
+
+// ── setup checklist (SPEC §11) ──────────────────────────────────────────────
+
+function checklistHtml() {
+  const { priced, total } = setupProgress(state.services);
+  const pricesDone = total > 0 && priced === total;
+  const later = '<span class="later">arrives in step 4</span>';
+  return `
+    <section class="checklist" aria-labelledby="checklist-title">
+      <div class="checklist-head">
+        <h2 class="group-title" id="checklist-title">setup checklist</h2>
+        <button class="link-btn" data-action="dismiss-checklist">hide</button>
+      </div>
+      <ol>
+        <li class="${pricesDone ? 'done' : ''}">
+          enter each service's price and confirm how it's billed. a statement is the best source.
+          <span class="progress">${priced} of ${total} priced</span>
+        </li>
+        <li>
+          for each service you pay for now, mark subscribed on the date of its most recent charge
+          (spotify, uzzu, nintendo, claude, google one, paramount+, amazon prime, icloud+, netflix, ps plus).
+          annual keepers (nintendo, google one, prime) may go back to 2025; that's what makes this year's spend right.
+          ${later}
+        </li>
+        <li>for rotators you've already cancelled (or cancel now), mark cancelled. ${later}</li>
+        <li>optional: backfill earlier rotations this year, so the year view and averages cover the whole year. ${later}</li>
+      </ol>
+    </section>`;
+}
+
+async function loadStarter(button) {
+  if (state.services.length) return; // SPEC §8.5: only offered with zero services
+  await busy(button, async () => {
+    button.textContent = 'loading…';
+    try {
+      state.services = await db.insertServices(starterRows());
+      setChecklistDismissed(false);
+      render();
+      toast(`loaded ${state.services.length} services`);
+    } catch (err) {
+      if (err.code === '23505') {
+        // Another tab (or a double submit) got there first. Show what's really there.
+        await load();
+        toast('the starter list was already loaded');
+      } else {
+        toast(err.message, { error: true });
+        if (button.isConnected) button.textContent = 'load starter list';
+      }
+    }
+  });
 }
 
 function groupHtml(label, entries, today, rowClass = '') {
@@ -470,6 +544,15 @@ const ACTIONS = {
   'close-delete': closeDelete,
   'toggle-archived': () => {
     state.showArchived = !state.showArchived;
+    render();
+  },
+  'load-starter': loadStarter,
+  'dismiss-checklist': () => {
+    setChecklistDismissed(true);
+    render();
+  },
+  'show-checklist': () => {
+    setChecklistDismissed(false);
     render();
   },
   archive,
