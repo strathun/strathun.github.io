@@ -122,6 +122,29 @@
   }
   .detail-actions p { flex-basis: 100%; }
 
+  /* ── period history and charges ── */
+  .history {
+    margin-top: 14px; background: var(--bg1); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 14px 18px;
+  }
+  .history .group-title { margin-bottom: 4px; }
+  .period-list { list-style: none; }
+  .period { padding: 10px 0; border-top: 1px solid var(--border); }
+  .period-list .period:first-child { border-top: none; }
+  .period-list + .period { border-top: 1px dashed var(--border); }
+  .period-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; }
+  .period-dates { font-weight: 600; }
+  .period-meta { font-size: 11px; color: var(--muted); }
+  .charge-list { list-style: none; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+  .charge {
+    display: grid; grid-template-columns: 8.5em minmax(0, 1fr) auto; gap: 8px; align-items: center;
+    font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  .charge-date { color: var(--muted); }
+  .charge-what { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; min-width: 0; }
+  .charge-amount.unknown { color: var(--warn); }
+  .charge-none { margin-top: 4px; }
+
   /* ── setup checklist ── */
   .checklist {
     background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg);

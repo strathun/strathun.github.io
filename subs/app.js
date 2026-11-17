@@ -11,9 +11,10 @@
 import { todayLocal, formatDay } from './logic/dates.js';
 import { groupByService, serviceStatus } from './logic/status.js';
 import {
-  CATEGORIES, INTERVALS, formatPrice, formValues, serviceFromForm,
+  CATEGORIES, INTERVALS, INTERVAL_SHORT, formatCents, formatPrice, formValues, serviceFromForm,
   findNameConflict, groupServices, serviceBadges, canArchive, isWebUrl, setupProgress,
 } from './logic/services.js';
+import { periodHistory } from './logic/history.js';
 import { starterRows } from './logic/starter.js';
 import * as db from './db.js';
 
@@ -21,6 +22,7 @@ const state = {
   loaded: false,
   services: [],
   periodsByService: new Map(),
+  chargesByService: new Map(),
   showArchived: false,
 };
 
@@ -75,6 +77,8 @@ function setChecklistDismissed(dismissed) {
 }
 
 const findService = (id) => state.services.find((s) => s.id === id) ?? null;
+const periodsOf = (id) => state.periodsByService.get(id) ?? [];
+const chargesOf = (id) => state.chargesByService.get(id) ?? [];
 const detailHref = (id) => `#/s/${encodeURIComponent(id)}`;
 
 /** Local calendar date of a timestamptz such as archived_at. */
@@ -96,6 +100,7 @@ async function load() {
   }
   state.services = data.services;
   state.periodsByService = groupByService(data.periods);
+  state.chargesByService = groupByService(data.charges);
   state.loaded = true;
   render();
 }
@@ -109,6 +114,7 @@ function upsertLocal(row) {
 function removeLocal(id) {
   state.services = state.services.filter((s) => s.id !== id);
   state.periodsByService.delete(id);
+  state.chargesByService.delete(id);
 }
 
 // ── routing ─────────────────────────────────────────────────────────────────
@@ -332,7 +338,7 @@ function renderDetail(id) {
   }
 
   const today = todayLocal();
-  const status = serviceStatus(state.periodsByService.get(service.id) ?? [], today);
+  const status = serviceStatus(periodsOf(service.id), today);
   const badges = badgesHtml(service, today);
   const lead = service.cancel_lead_days;
 
@@ -372,7 +378,69 @@ function renderDetail(id) {
       </dl>
 
       <div class="detail-actions">${actions}</div>
-    </article>`;
+    </article>
+    ${historyHtml(service, today)}`;
+}
+
+// ── period history and charges (SPEC §8.3) ──────────────────────────────────
+
+function periodHeadHtml({ period, open, accessEndsOn }, today) {
+  const start = esc(formatDay(period.started_on, today));
+  if (open) {
+    const next = period.renews_on
+      ? `<span class="period-meta">next charge ${esc(formatDay(period.renews_on, today))}</span>`
+      : '';
+    return `<span class="period-dates">${start} → <span class="status-renewing">renewing</span></span> ${next}`;
+  }
+  return `
+    <span class="period-dates">${start} → ${esc(formatDay(accessEndsOn, today))}</span>
+    <span class="period-meta">cancelled ${esc(formatDay(period.cancelled_on, today))}</span>`;
+}
+
+function chargeHtml(charge, today) {
+  const amount = charge.amount_cents == null
+    ? `<span class="charge-amount unknown">amount unknown</span>`
+    : `<span class="charge-amount">${esc(formatCents(charge.amount_cents))}</span>`;
+  const interval = INTERVAL_SHORT[charge.billing_interval] ?? charge.billing_interval;
+  const auto = charge.source === 'auto'
+    ? `<span class="badge badge-muted" title="recorded automatically on the renewal date">auto</span>`
+    : '';
+  return `
+    <li class="charge">
+      <span class="charge-date">${esc(formatDay(charge.charged_on, today))}</span>
+      <span class="charge-what">${amount}<span class="muted"> / ${esc(interval)}</span> ${auto}</span>
+    </li>`;
+}
+
+function chargeListHtml(charges, today) {
+  if (!charges.length) return `<p class="muted small charge-none">no charges</p>`;
+  return `<ul class="charge-list">${charges.map((c) => chargeHtml(c, today)).join('')}</ul>`;
+}
+
+function historyHtml(service, today) {
+  const { periods, loose } = periodHistory(periodsOf(service.id), chargesOf(service.id));
+  let body;
+  if (!periods.length && !loose.length) {
+    body = `<p class="muted small">no periods yet.</p>`;
+  } else {
+    body = `<ol class="period-list">${periods.map((entry) => `
+      <li class="period ${entry.open ? 'is-open' : ''}">
+        <div class="period-head">${periodHeadHtml(entry, today)}</div>
+        ${chargeListHtml(entry.charges, today)}
+      </li>`).join('')}</ol>`;
+    if (loose.length) {
+      body += `
+        <div class="period loose">
+          <div class="period-head"><span class="period-dates">charges in no period</span></div>
+          ${chargeListHtml(loose, today)}
+        </div>`;
+    }
+  }
+  return `
+    <section class="history" aria-labelledby="history-title">
+      <h2 class="group-title" id="history-title">periods and charges</h2>
+      ${body}
+    </section>`;
 }
 
 // ── add / edit form (SPEC §8.4) ─────────────────────────────────────────────

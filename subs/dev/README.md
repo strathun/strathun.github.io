@@ -41,6 +41,7 @@ npx playwright install chromium
 | `checks-starter.cjs` | starter list, setup checklist |
 | `checks-dialogs.cjs` | dialogs during slow saves, back button, malformed links |
 | `checks-nav.cjs` | shared nav on every page at 375–1280px |
+| `checks-history.cjs` | period history and charges on service detail |
 | `supabase-stub.sql` | roles, `auth.users` and `auth.uid()`: enough Supabase for plain Postgres |
 | `sql-check.sh` | runs `schema.sql`, `migrations/*.sql` and `rls-test.sql` on a local Postgres |
 

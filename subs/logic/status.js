@@ -47,3 +47,11 @@ export function serviceStatus(periods, today) {
   const accessEndsOn = accessEnd(period);
   return { status: accessEndsOn >= today ? 'ending' : 'inactive', period, accessEndsOn };
 }
+
+/**
+ * The period still renewing (cancelled_on null), or null. The database allows at
+ * most one per service (SPEC §6), and Mark subscribed is disabled while it exists.
+ */
+export function openPeriod(periods) {
+  return periods.find((p) => p.cancelled_on == null) ?? null;
+}

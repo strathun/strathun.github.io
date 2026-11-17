@@ -2,7 +2,7 @@
 // script, so pages run with no network and no real database.
 //
 // - Signed in as tester@example.com.
-// - Tables live in memory. Seed them by putting JSON { services: [...], periods: [...] }
+// - Tables live in memory. Seed them by putting JSON { services: [...], periods: [...], charges: [...] }
 //   in localStorage '__seed' before the page loads.
 // - Enforces unique lower(name) on services (Postgres error 23505), like the real index.
 //   Nothing else is enforced: no RLS, no foreign keys, no other constraints.

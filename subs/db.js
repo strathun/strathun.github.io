@@ -29,13 +29,15 @@ function one(rows, what) {
 }
 
 export async function loadAll() {
-  const [services, periods] = await Promise.all([
+  const [services, periods, charges] = await Promise.all([
     window.sb.from('services').select('*'),
     window.sb.from('periods').select('*'),
+    window.sb.from('charges').select('*'),
   ]);
   return {
     services: unwrap(services, 'load services'),
     periods: unwrap(periods, 'load periods'),
+    charges: unwrap(charges, 'load charges'),
   };
 }
 
