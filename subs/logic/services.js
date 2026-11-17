@@ -212,7 +212,8 @@ export function findNameConflict(services, name, exceptId = null) {
 
 // ── dashboard ───────────────────────────────────────────────────────────────
 
-const byName = (a, b) => {
+/** Sorts entries shaped { service, … } by service name, ignoring case. */
+export const byName = (a, b) => {
   const x = a.service.name.toLowerCase();
   const y = b.service.name.toLowerCase();
   return x < y ? -1 : x > y ? 1 : 0;

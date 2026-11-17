@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { yearView } from './yearview.js';
+import { yearView, yearRange, clampYear } from './yearview.js';
 import { spendMetrics } from './spend.js';
 import { svc, period, charge, TODAY } from './fixtures.js';
 
@@ -98,4 +98,34 @@ test('acceptance 12: the totals row matches This month (and every monthly total)
   assert.equal(view.totals[10], spend.thisMonth);
   assert.equal(view.totals[10], 834 + 1500);
   assert.deepEqual(view.totals, spend.monthly);
+});
+
+test('rows are sorted by name, case-insensitively, archived ones in place (SPEC §8.2)', () => {
+  const services = [
+    svc({ id: 'z', name: 'zulu' }),
+    svc({ id: 'a', name: 'Alpha', archived_at: '2026-06-01T00:00:00+00:00' }),
+    svc({ id: 'm', name: 'mike' }),
+  ];
+  const periods = services.map((s) => period({ service_id: s.id, started_on: '2026-03-01', renews_on: '2026-04-01', cancelled_on: '2026-03-01', access_ends_on: '2026-03-31' }));
+  const view = yearView({ services, periods, charges: [], year: 2026, today: TODAY });
+  assert.deepEqual(view.rows.map((r) => r.service.id), ['a', 'm', 'z']);
+});
+
+test('yearRange: the first year with a period or charge, through next year', () => {
+  assert.deepEqual(yearRange({ periods: [], charges: [], today: TODAY }), { first: 2026, last: 2027 }, 'no data: this year and next');
+  const range = yearRange({
+    periods: [period({ started_on: '2025-12-05' })],
+    // a charge whose period was deleted can be the oldest row
+    charges: [charge({ charged_on: '2024-08-10' }), charge({ charged_on: '2026-01-01' })],
+    today: TODAY,
+  });
+  assert.deepEqual(range, { first: 2024, last: 2027 });
+});
+
+test('clampYear: a year outside the range shows the nearest one (acceptance 22)', () => {
+  const range = { first: 2025, last: 2027 };
+  assert.equal(clampYear(1999, range), 2025);
+  assert.equal(clampYear(2026, range), 2026);
+  assert.equal(clampYear(2027, range), 2027);
+  assert.equal(clampYear(3000, range), 2027);
 });

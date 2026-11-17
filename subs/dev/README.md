@@ -49,6 +49,7 @@ npx playwright install chromium
 | `checks-charges.cjs` | edit charge: amount, date, set-as-price, partial failures and retries |
 | `checks-alerts.cjs` | dashboard alerts: order, text, acting in place (acceptance 20), an older open period (acceptance 19) |
 | `checks-spend.cjs` | dashboard spend tiles: hand-worked numbers, archiving changes nothing (acceptance 3), rounding, layout |
+| `checks-yearview.cjs` | year view: grid cells and totals (acceptance 12), past and future years (21), `#/y/{year}` and its range (22), back button, phone scrolling (16) |
 | `supabase-stub.sql` | roles, `auth.users` and `auth.uid()`: enough Supabase for plain Postgres |
 | `sql-check.sh` | runs `schema.sql`, `migrations/*.sql` and `rls-test.sql` on a local Postgres |
 
