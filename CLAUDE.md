@@ -33,6 +33,7 @@ strathun.github.io/
 ├── subs/                # Subscription tracker (in progress)
 │   ├── SPEC.md          # Behavior spec: source of truth for logic and acceptance criteria
 │   ├── schema.sql       # Tables + RLS (rls-test.sql verifies it)
+│   ├── migrations/      # Later schema changes, run in order after schema.sql (002: transaction functions)
 │   ├── package.json     # Marks subs/ as ES modules for node --test; not a build
 │   ├── index.html       # Markup + styles; loads app.js as a module
 │   ├── app.js           # Rendering, hash routes (#/ dashboard, #/s/{id} detail), events
@@ -177,7 +178,12 @@ transaction; last row must read `ALL RLS CHECKS PASSED`).
 - `user_id` defaults to `auth.uid()`, so clients never send it.
 - Child tables use composite FKs on `(service_id, user_id)` so a user can't attach rows to another user's service.
 - `schema.sql` uses `create ... if not exists`, so re-running it won't alter an existing table. Later schema
-  changes go in a new `alter table` migration (e.g. `subs/migrations/002-*.sql`).
+  changes go in a numbered migration in `subs/migrations/`, run in Supabase's SQL editor after `schema.sql`.
+- `migrations/002-subscribe-and-delete-period.sql` adds `mark_subscribed()` and `delete_period()`: multi-row
+  writes that must all succeed or all fail, so each runs as one Postgres function (one transaction). They're
+  `security invoker` (RLS still applies), execute is revoked from `anon`, and the page calls them with `sb.rpc()`.
+- `bash subs/dev/sql-check.sh` runs the schema, migrations and `rls-test.sql` on a local Postgres (cloud
+  sessions have Postgres 16 installed; see `subs/dev/README.md`). Run it before asking for a migration on Supabase.
 
 **When adding tables for new apps:** always enable RLS and add the four standard policies (select/insert/update/delete scoped to `auth.uid() = user_id`). Write the SQL in a comment block at the top of the app's `index.html`, or for larger schemas in `<app>/schema.sql`. Use `(select auth.uid())` in policies, add `to authenticated`, and give updates a `with check`.
 

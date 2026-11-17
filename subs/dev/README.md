@@ -41,6 +41,8 @@ npx playwright install chromium
 | `checks-starter.cjs` | starter list, setup checklist |
 | `checks-dialogs.cjs` | dialogs during slow saves, back button, malformed links |
 | `checks-nav.cjs` | shared nav on every page at 375–1280px |
+| `supabase-stub.sql` | roles, `auth.users` and `auth.uid()`: enough Supabase for plain Postgres |
+| `sql-check.sh` | runs `schema.sql`, `migrations/*.sql` and `rls-test.sql` on a local Postgres |
 
 ## Writing a check
 
@@ -48,4 +50,18 @@ npx playwright install chromium
 - Seed data with dates around the frozen clock (2026-11-16, the same day as `subs/logic/fixtures.js`),
   so date text like "until dec 9" never changes as real time passes.
 - The fake enforces only the unique service name. Anything the database guarantees
-  (RLS, foreign keys, transactions) still needs `subs/rls-test.sql` or a real-database check.
+  (RLS, foreign keys, transactions) still needs `subs/rls-test.sql` (below) or a real-database check.
+
+## SQL check (local Postgres)
+
+`rls-test.sql` is written for the Supabase SQL editor, but it also runs on plain Postgres 15+
+with `supabase-stub.sql` standing in for Supabase's roles and `auth` schema:
+
+```bash
+PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres bash subs/dev/sql-check.sh
+```
+
+It recreates a `subs_rls_test` database, runs `schema.sql` and every migration twice (both promise
+they're safe to re-run), then `rls-test.sql`, and fails unless the last row is `ALL RLS CHECKS PASSED`.
+Use it before asking for a migration to be run on Supabase. It doesn't replace that real run: the stub
+only imitates Supabase's grants and `auth.uid()`.
