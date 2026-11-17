@@ -53,6 +53,14 @@ test('formatCents', () => {
   assert.equal(formatCents(null), '—');
 });
 
+test('formatCents rounds fractional cents to the nearest cent, only for display (SPEC §7)', () => {
+  assert.equal(formatCents(5000 / 12), '$4.17', 'an annual $50 run rate');
+  assert.equal(formatCents(10000 / 12), '$8.33');
+  assert.equal(formatCents(833.5), '$8.34');
+  assert.equal(formatCents(12000.000000000002), '$120.00', 'float noise from summed run rates');
+  assert.equal(formatCents(-0.4), '$0.00', 'no negative zero');
+});
+
 test('centsToInput round-trips through parseCents', () => {
   for (const cents of [0, 5, 99, 100, 1299, 2100, 123456]) {
     assert.equal(parseCents(centsToInput(cents)).value, cents);

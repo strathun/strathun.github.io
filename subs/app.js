@@ -8,7 +8,7 @@
 //   #/        dashboard
 //   #/s/{id}  service detail
 
-import { todayLocal, formatDay } from './logic/dates.js';
+import { todayLocal, formatDay, parseYmd, MONTH_SHORT } from './logic/dates.js';
 import { groupByService, serviceStatus, openPeriod, accessEnd } from './logic/status.js';
 import {
   CATEGORIES, INTERVALS, INTERVAL_SHORT, formatCents, formatPrice, formValues, serviceFromForm,
@@ -23,6 +23,7 @@ import {
 import { starterRows } from './logic/starter.js';
 import { dashboardAlerts } from './logic/alerts.js';
 import { planCatchUpAll } from './logic/periods.js';
+import { spendMetrics } from './logic/spend.js';
 import * as db from './db.js';
 
 const state = {
@@ -89,6 +90,10 @@ const findService = (id) => state.services.find((s) => s.id === id) ?? null;
 const periodsOf = (id) => state.periodsByService.get(id) ?? [];
 const chargesOf = (id) => state.chargesByService.get(id) ?? [];
 const detailHref = (id) => `#/s/${encodeURIComponent(id)}`;
+const yearHref = (year) => `#/y/${year}`;
+
+/** Every period or charge, archived services included (spend counts them, SPEC §7.5). */
+const allRows = (map) => [...map.values()].flat();
 
 /** Local calendar date of a timestamptz such as archived_at. */
 const localDay = (timestamp) => todayLocal(new Date(timestamp));
@@ -268,7 +273,47 @@ function renderDashboard() {
     ? `<button class="link-btn" data-action="show-checklist">show setup checklist</button>`
     : '';
 
-  $('#view').innerHTML = header + alertsHtml(today) + checklist + sections + none + archived + reopen;
+  const year = parseYmd(today).y;
+  const spend = spendHtml(year, today, { title: `spend ${year}` });
+  $('#view').innerHTML = header + spend + alertsHtml(today) + checklist + sections + none + archived + reopen;
+}
+
+// ── spend tiles (SPEC §7.5, §8.1, §8.2) ─────────────────────────────────────
+
+/**
+ * The three spend tiles for `year`: this year on the dashboard, the selected year on
+ * the year view. A past year shows December and its total, with no projection (it
+ * equals the total). A future year has no month M, so three of the numbers are blank.
+ */
+function spendHtml(year, today, { title, link = false }) {
+  const m = spendMetrics({
+    services: state.services, periods: allRows(state.periodsByService), charges: allRows(state.chargesByService), year, today,
+  });
+  const thisYear = parseYmd(today).y;
+  const past = year < thisYear;
+  const span = m.month > 1 ? `jan–${MONTH_SHORT[m.month - 1]}` : m.month === 1 ? 'jan' : '';
+  const tile = (label, cents, subs = []) => `
+    <div class="tile">
+      <dt>${label}</dt>
+      <dd class="tile-value">${esc(formatCents(cents))}</dd>
+      ${subs.map((s) => `<dd class="tile-sub">${s}</dd>`).join('')}
+    </div>`;
+  const totalSubs = [`cash paid ${esc(formatCents(m.cash))}`];
+  if (!past) totalSubs.unshift(`projected <strong>${esc(formatCents(m.projected))}</strong> if nothing changes`);
+  const soFarLabel = past ? 'year total' : year === thisYear ? 'this year so far' : 'so far';
+
+  return `
+    <section class="spend" aria-labelledby="spend-title">
+      <div class="section-head">
+        <h2 class="group-title" id="spend-title">${esc(title)}</h2>
+        ${link ? `<a class="link-btn" href="${yearHref(year)}">year view →</a>` : ''}
+      </div>
+      <dl class="tiles">
+        ${tile(past ? 'december' : 'this month', m.thisMonth)}
+        ${tile('average monthly', m.average, span ? [span] : [])}
+        ${tile(soFarLabel, m.soFar, totalSubs)}
+      </dl>
+    </section>`;
 }
 
 // ── alerts (SPEC §7.2, §8.1) ────────────────────────────────────────────────

@@ -89,6 +89,25 @@
   }
   .badge-muted { border-style: dashed; }
 
+  /* ── spend tiles (SPEC §8.1) ── */
+  .spend { margin-bottom: 24px; }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .section-head .link-btn { margin: 0 0 8px; padding: 0; }
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .tile {
+    min-width: 0; background: var(--bg1); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 12px;
+  }
+  .tile:last-child { grid-column: 1 / -1; }
+  @media (min-width: 560px) {
+    .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .tile:last-child { grid-column: auto; }
+  }
+  .tile dt { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .tile-value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .tile-sub { font-size: 11px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .tile-sub strong { color: var(--text); font-weight: 500; }
+
   /* ── alerts (SPEC §8.1) ── */
   .alerts { margin-bottom: 24px; }
   .alert-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
