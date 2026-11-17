@@ -87,10 +87,10 @@ const SEED = {
   ];
   check('alerts: order, tags, text and actions', JSON.stringify(list) === JSON.stringify(want), JSON.stringify(list, null, 1));
   check('alerts title counts them', (await text('#alerts-title')) === 'alerts8');
-  check('alerts come before the checklist and the groups', await page.evaluate(() => {
+  check('alerts come right after the spend tiles, before the checklist and the groups', await page.evaluate(() => {
     const view = document.getElementById('view');
     const kids = [...view.children].filter((el) => el.matches('section'));
-    return kids[0]?.classList.contains('alerts') && kids[1]?.classList.contains('checklist');
+    return kids[0]?.classList.contains('spend') && kids[1]?.classList.contains('alerts') && kids[2]?.classList.contains('checklist');
   }));
   check('archived Disney+ and far-off Claude have no alert', !list.some((a) => a.name === 'Disney+' || a.name === 'Claude'));
   check('only the passed decide-by is marked overdue', (await page.$$eval('.alert.is-overdue .alert-name', (els) => els.map((e) => e.textContent))).join() === 'Nintendo Switch Online');

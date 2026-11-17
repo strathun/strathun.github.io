@@ -89,6 +89,72 @@
   }
   .badge-muted { border-style: dashed; }
 
+  /* ── spend tiles (SPEC §8.1) ── */
+  .spend { margin-bottom: 24px; }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .section-head .link-btn { margin: 0 0 8px; padding: 0; }
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .tile {
+    min-width: 0; background: var(--bg1); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 12px;
+  }
+  .tile:last-child { grid-column: 1 / -1; }
+  @media (min-width: 560px) {
+    .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .tile:last-child { grid-column: auto; }
+  }
+  .tile dt { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .tile-value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .tile-sub { font-size: 11px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .tile-sub strong { color: var(--text); font-weight: 500; }
+
+  /* ── year view (SPEC §8.2): only the grid scrolls sideways, inside .grid-wrap ── */
+  .year-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 20px; }
+  .year-title { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .year-switch { display: flex; gap: 6px; }
+  .btn.is-disabled { opacity: .35; cursor: default; }
+  /* position: relative keeps the absolutely positioned .sr-only labels inside the
+     scroll area. Without it they escape it and widen the page at phone width. */
+  .grid-wrap {
+    position: relative; overflow-x: auto; background: var(--bg1); border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+  }
+  .grid-wrap:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+  .year-grid {
+    width: 100%; border-collapse: separate; border-spacing: 0;
+    font-size: 11px; font-variant-numeric: tabular-nums;
+  }
+  .year-grid th, .year-grid td {
+    padding: 7px 5px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border);
+  }
+  .year-grid thead th { color: var(--muted); font-weight: 500; }
+  .year-grid thead th.is-now { color: var(--accent); }
+  .year-grid .name {
+    position: sticky; left: 0; z-index: 1; background: var(--bg1);
+    text-align: left; padding-left: 12px; border-right: 1px solid var(--border);
+  }
+  .grid-name {
+    display: block; max-width: 8.5em; overflow: hidden; text-overflow: ellipsis;
+    color: var(--text); font-weight: 600;
+  }
+  .grid-name:hover { opacity: 1; text-decoration: underline; }
+  .grid-sub { display: block; font-size: 10px; color: var(--muted); font-weight: 400; }
+  .year-grid td.is-active { background: color-mix(in srgb, var(--accent) 20%, var(--bg1)); }
+  .year-grid tbody td, .year-grid tfoot td { width: 7%; } /* equal month columns; the name takes the rest */
+  .year-grid td.is-future { color: var(--muted); }
+  .year-grid tfoot th, .year-grid tfoot td { border-bottom: none; border-top: 1px solid var(--border2); font-weight: 600; }
+  .year-grid tbody tr:last-child > * { border-bottom: none; }
+  .legend { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.6; }
+  .legend-future { color: var(--dim); }
+  .swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px;
+    background: color-mix(in srgb, var(--accent) 20%, var(--bg1)); border: 1px solid var(--border2);
+  }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+
   /* ── alerts (SPEC §8.1) ── */
   .alerts { margin-bottom: 24px; }
   .alert-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }

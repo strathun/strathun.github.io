@@ -5,10 +5,11 @@
 // attributes and one delegated click listener instead of onclick="…".
 //
 // Views are picked by the URL hash, so the browser back button works:
-//   #/        dashboard
-//   #/s/{id}  service detail
+//   #/          dashboard
+//   #/s/{id}    service detail
+//   #/y/{year}  year view (#/y is this year)
 
-import { todayLocal, formatDay } from './logic/dates.js';
+import { todayLocal, formatDay, parseYmd, MONTH_SHORT } from './logic/dates.js';
 import { groupByService, serviceStatus, openPeriod, accessEnd } from './logic/status.js';
 import {
   CATEGORIES, INTERVALS, INTERVAL_SHORT, formatCents, formatPrice, formValues, serviceFromForm,
@@ -23,6 +24,8 @@ import {
 import { starterRows } from './logic/starter.js';
 import { dashboardAlerts } from './logic/alerts.js';
 import { planCatchUpAll } from './logic/periods.js';
+import { spendMetrics } from './logic/spend.js';
+import { yearView, yearRange, clampYear } from './logic/yearview.js';
 import * as db from './db.js';
 
 const state = {
@@ -89,6 +92,10 @@ const findService = (id) => state.services.find((s) => s.id === id) ?? null;
 const periodsOf = (id) => state.periodsByService.get(id) ?? [];
 const chargesOf = (id) => state.chargesByService.get(id) ?? [];
 const detailHref = (id) => `#/s/${encodeURIComponent(id)}`;
+const yearHref = (year) => `#/y/${year}`;
+
+/** Every period or charge, archived services included (spend counts them, SPEC §7.5). */
+const allRows = (map) => [...map.values()].flat();
 
 /** Local calendar date of a timestamptz such as archived_at. */
 const localDay = (timestamp) => todayLocal(new Date(timestamp));
@@ -170,6 +177,8 @@ function removeLocal(id) {
 // ── routing ─────────────────────────────────────────────────────────────────
 
 function currentRoute() {
+  const year = /^#\/y(?:\/(\d+))?\/?$/.exec(location.hash);
+  if (year) return { view: 'year', year: year[1] ? Number(year[1]) : null };
   const match = /^#\/s\/([^/]+)$/.exec(location.hash);
   if (!match) return { view: 'dashboard' };
   try {
@@ -183,6 +192,7 @@ function render() {
   if (!state.loaded) return;
   const route = currentRoute();
   if (route.view === 'detail') renderDetail(route.id);
+  else if (route.view === 'year') renderYear(route.year);
   else renderDashboard();
   if (state.catchUpError) {
     $('#view').insertAdjacentHTML('afterbegin', `
@@ -268,7 +278,47 @@ function renderDashboard() {
     ? `<button class="link-btn" data-action="show-checklist">show setup checklist</button>`
     : '';
 
-  $('#view').innerHTML = header + alertsHtml(today) + checklist + sections + none + archived + reopen;
+  const year = parseYmd(today).y;
+  const spend = spendHtml(year, today, { title: `spend ${year}`, link: true });
+  $('#view').innerHTML = header + spend + alertsHtml(today) + checklist + sections + none + archived + reopen;
+}
+
+// ── spend tiles (SPEC §7.5, §8.1, §8.2) ─────────────────────────────────────
+
+/**
+ * The three spend tiles for `year`: this year on the dashboard, the selected year on
+ * the year view. A past year shows December and its total, with no projection (it
+ * equals the total). A future year has no month M, so three of the numbers are blank.
+ */
+function spendHtml(year, today, {
+  title, link = false, periods = allRows(state.periodsByService), charges = allRows(state.chargesByService),
+}) {
+  const m = spendMetrics({ services: state.services, periods, charges, year, today });
+  const thisYear = parseYmd(today).y;
+  const past = year < thisYear;
+  const span = m.month > 1 ? `jan–${MONTH_SHORT[m.month - 1]}` : m.month === 1 ? 'jan' : '';
+  const tile = (label, cents, subs = []) => `
+    <div class="tile">
+      <dt>${label}</dt>
+      <dd class="tile-value">${esc(formatCents(cents))}</dd>
+      ${subs.map((s) => `<dd class="tile-sub">${s}</dd>`).join('')}
+    </div>`;
+  const totalSubs = [`cash paid ${esc(formatCents(m.cash))}`];
+  if (!past) totalSubs.unshift(`projected <strong>${esc(formatCents(m.projected))}</strong> if nothing changes`);
+  const soFarLabel = past ? 'year total' : year === thisYear ? 'this year so far' : 'so far';
+
+  return `
+    <section class="spend" aria-labelledby="spend-title">
+      <div class="section-head">
+        <h2 class="group-title" id="spend-title">${esc(title)}</h2>
+        ${link ? `<a class="link-btn" href="${yearHref(year)}">year view →</a>` : ''}
+      </div>
+      <dl class="tiles">
+        ${tile(past ? 'december' : 'this month', m.thisMonth)}
+        ${tile('average monthly', m.average, span ? [span] : [])}
+        ${tile(soFarLabel, m.soFar, totalSubs)}
+      </dl>
+    </section>`;
 }
 
 // ── alerts (SPEC §7.2, §8.1) ────────────────────────────────────────────────
@@ -418,6 +468,75 @@ function rowHtml({ service, status, accessEndsOn }, today, rowClass) {
         ${badges ? `<span class="row-badges">${badges}</span>` : ''}
       </a>
     </li>`;
+}
+
+// ── year view (SPEC §7.6, §8.2) ─────────────────────────────────────────────
+
+/** `requested` is the year in the URL, or null for this year. */
+function renderYear(requested) {
+  const today = todayLocal();
+  const thisYear = parseYmd(today).y;
+  const periods = allRows(state.periodsByService);
+  const charges = allRows(state.chargesByService);
+  const range = yearRange({ periods, charges, today });
+  const year = clampYear(requested ?? thisYear, range);
+  // Put the year shown in the address bar (acceptance 22), also for #/y, #/y/ and #/y/02026.
+  // replaceState fires no hashchange.
+  if (location.hash !== yearHref(year)) history.replaceState(null, '', yearHref(year));
+
+  // Links, not buttons, so the back button steps back through the years viewed.
+  const step = (to, label) => (to < range.first || to > range.last
+    ? `<span class="btn btn-sm is-disabled" aria-hidden="true">${label}</span>` // no such year: layout only
+    : `<a class="btn btn-sm" href="${yearHref(to)}">${label}</a>`);
+  const view = yearView({ services: state.services, periods, charges, year, today });
+
+  $('#view').innerHTML = `
+    <a class="back" href="#/">← all services</a>
+    <div class="year-head">
+      <h1 class="year-title">${year}</h1>
+      <nav class="year-switch" aria-label="years">${step(year - 1, `← ${year - 1}`)}${step(year + 1, `${year + 1} →`)}</nav>
+    </div>
+    ${spendHtml(year, today, { title: 'spend', periods, charges })}
+    ${gridHtml(view, year, year === thisYear ? view.month : 0)}`;
+}
+
+/** Grid amounts drop the $ to keep twelve columns narrow; the caption says they're dollars. */
+const gridAmount = (cents) => esc(formatCents(cents, { symbol: false }));
+
+/** `nowMonth` is this month's column (1–12) when showing this year, else 0. */
+function gridHtml(view, year, nowMonth) {
+  if (!view.rows.length) {
+    return `<div class="empty"><p>nothing was active or charged in ${year}.</p></div>`;
+  }
+  const cellClass = (c) => [c.active && 'is-active', c.future && 'is-future'].filter(Boolean).join(' ');
+  const head = MONTH_SHORT.map((name, i) => `<th scope="col"${i + 1 === nowMonth ? ' class="is-now"' : ''}>${name}</th>`).join('');
+  const rows = view.rows.map(({ service, cells }) => `
+    <tr>
+      <th scope="row" class="name">
+        <a class="grid-name" href="${detailHref(service.id)}" title="${esc(service.name)}">${esc(service.name)}</a>
+        ${service.archived_at ? '<span class="grid-sub">archived</span>' : ''}
+      </th>
+      ${cells.map((c) => `<td class="${cellClass(c)}">${c.cents == null ? '' : gridAmount(c.cents)}${c.active ? '<span class="sr-only"> active</span>' : ''}</td>`).join('')}
+    </tr>`).join('');
+  const totals = view.totals.map((cents, i) => {
+    const month = i + 1;
+    return `<td class="${cellClass({ month, active: false, future: month > view.month })}">${gridAmount(cents)}</td>`;
+  }).join('');
+
+  return `
+    <div class="grid-wrap" role="region" aria-labelledby="grid-caption" tabindex="0">
+      <table class="year-grid">
+        <caption id="grid-caption" class="sr-only">${year} by service and month, in dollars</caption>
+        <thead><tr><th scope="col" class="name">service</th>${head}</tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><th scope="row" class="name">total</th>${totals}</tr></tfoot>
+      </table>
+    </div>
+    <p class="legend">
+      <span class="swatch" aria-hidden="true"></span> subscribed that month ·
+      <span class="legend-future">grey</span>: paid ahead for months to come ·
+      amounts in $, with annual and quarterly charges spread over the months they cover
+    </p>`;
 }
 
 // ── service detail (SPEC §8.3) ──────────────────────────────────────────────

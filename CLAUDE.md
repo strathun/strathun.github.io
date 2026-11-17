@@ -36,7 +36,7 @@ strathun.github.io/
 │   ├── migrations/      # Later schema changes, run in order after schema.sql (002: transaction functions)
 │   ├── package.json     # Marks subs/ as ES modules for node --test; not a build
 │   ├── index.html       # Markup + styles; loads app.js as a module
-│   ├── app.js           # Rendering, hash routes (#/ dashboard, #/s/{id} detail), events
+│   ├── app.js           # Rendering, hash routes (#/ dashboard, #/s/{id} detail, #/y/{year} year view), events
 │   ├── db.js            # Supabase calls (rpc for the migration 002 functions); throws DbError so the page can show it
 │   ├── logic/           # Pure logic (SPEC §7, service/period/charge forms, starter list) + *.test.js, no DOM or Supabase
 │   └── dev/             # Browser checks: Playwright + a fake in-memory Supabase (see its README)
@@ -257,6 +257,10 @@ No build step. CI only runs tests; it doesn't deploy.
   that take plain rows and `today` as arguments, with a `*.test.js` beside each. Pages load them with
   `<script type="module">`. Logic never touches the DOM or Supabase and never calls `toISOString()`
   (`subs/logic/guard.test.js` enforces this). Test helpers must not be named `test-*.js`, or `node --test` runs them.
+- **Money** is integer cents. `formatCents()` in `subs/logic/services.js` is the only place it's rounded
+  (averages and run rates are fractional); don't round in logic.
+- **Sideways-scrolling containers** (e.g. the subs year grid) need `position: relative`, or absolutely
+  positioned children like `.sr-only` labels escape them and widen the page at phone width.
 - **Git commits:** present tense, lowercase, descriptive (`add habit tracker`, `fix calendar day selection bug`)
 
 ---
