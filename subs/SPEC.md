@@ -1,8 +1,14 @@
 # Subscription Rotation Tracker — Spec
 
-Status: Draft v1.4 · Owner: Hunter · Route: `strathun.github.io/subs/`
+Status: Draft v1.5 · Owner: Hunter · Route: `strathun.github.io/subs/`
 
 **Changelog**
+- v1.5 (2026-11-17): settled the subscribe/cancel gaps before building step 4.
+  - Mark subscribed asks for the amount charged and can save it as the service's price, so prices and dates are entered together (§7.3).
+  - Mark subscribed and Delete period each run in one database transaction (§6, §7.3, §8.3).
+  - Periods can be deleted with their charges, and charges edited, so backfill mistakes are fixed in the app (§8.3).
+  - Editing a charge's amount can also update the current price (§8.3, §9).
+  - Setup checklist: confirm the billing interval before marking a service subscribed (§11).
 - v1.4 (2026-11-17): settled the services-screen gaps before building step 3.
   - Archive is disabled while a service is renewing, so its charges can't continue unseen (§8.4).
   - Changing a price fills in `price_checked_on` with today unless you set the date (§8.4).
@@ -81,6 +87,8 @@ I want to keep only the subscriptions I'm actively using. Streaming services sho
 All tables have `user_id uuid not null default auth.uid() references auth.users`, and RLS policies for select/insert/update/delete with `user_id = auth.uid()`.
 
 Tenant safety: an RLS policy only checks the row being written, so child tables (`periods`, `charges`, `watchlist_items`) reference their parent with a composite FK on `(service_id, user_id)` → `services(id, user_id)`. `charges` references `periods(id, service_id, user_id)` with `on delete set null (period_id)`. A charge's period must then belong to the same service and user. Source of truth: `subs/schema.sql`.
+
+Multi-row writes that must succeed or fail together run as Postgres functions in one transaction: Mark subscribed (§7.3) and Delete period (§8.3). They are `security invoker`, so they run as the signed-in user and RLS still applies. They live in `subs/migrations/002-*.sql`, and `subs/rls-test.sql` covers them.
 
 ### `services`
 | column | type | notes |
@@ -162,9 +170,12 @@ Archived services show no alerts.
 - **Amount unknown**: any charge with null `amount_cents`.
 
 ### 7.3 Subscribing, cancelling, automatic renewals
-- **Mark subscribed** (date defaults to today and is editable, so the same flow backfills history):
+- **Mark subscribed** (date defaults to today and is editable, so the same flow backfills history; it can't be in the future):
+  - asks for the **amount charged**, prefilled from `price_cents`. Blank records an unknown amount;
   - creates a period with `started_on = date` and `renews_on = date + 1 interval`;
-  - creates a charge on `date` for `price_cents`.
+  - creates a charge on `date` for that amount;
+  - **Also set as current price** (checkbox, shown when the amount differs from `price_cents` or the price is unknown; ticked by default when the price is unknown): sets `price_cents` to the amount and `price_checked_on` to `date`, so catch-up renewals charge the right amount;
+  - writes the period, the charge and any price change in one transaction (§6), so a dropped connection can't leave a period without its charge.
 - **Mark cancelled**: sets `cancelled_on` (default today). Default `access_ends_on = renews_on - 1 day`, editable, because the service's confirmation screen states the real date.
 - **Automatic renewal catch-up** runs on app load, for each period with `cancelled_on` null and `renews_on <= today`:
   1. insert a charge (`charged_on = renews_on`, `amount_cents = price_cents`, `source = auto`);
@@ -228,7 +239,9 @@ Among inactive, non-archived rotators with at least one open watchlist item, pic
 2. **Year view**: the §7.6 grid with a year switcher. On a phone it scrolls horizontally inside its own container, with the service-name column sticky. The page itself never scrolls sideways.
 3. **Service detail** (its own URL, `#/s/{id}`, so the browser back button returns to the dashboard)
    - Status, the **Open manage page** button, help link, price ("checked {date}"), notes.
-   - Period history, charges (amounts editable, `auto` ones badged), watchlist.
+   - Period history. **Delete period** removes the period and its charges in one transaction (§6), after a confirmation that lists the charges it removes. It's how a backfill mistake is fixed: to change a start date, delete the period and mark subscribed again.
+   - Charges, with `auto` ones badged. Amount and date are editable. Changing an amount offers **Also set as current price** (sets `price_cents`, and `price_checked_on` to the charge date).
+   - Watchlist.
    - Actions: **Mark subscribed**, **Mark cancelled**, **Add reminder (.ics)**, Edit, Archive.
 4. **Add / edit / remove services**
    - **Add / Edit**: a form for all `services` fields.
@@ -249,7 +262,7 @@ Among inactive, non-archived rotators with at least one open watchlist item, pic
 4. Tap **Mark cancelled** and confirm `access_ends_on`.
 5. The service shows "Active until {date}".
 
-**Keeper renewal:** the Decide-by warning appears. If you do nothing, catch-up records the renewal charge on the renewal date. If the price changed, edit that charge and update `price_cents`. To drop the keeper, cancel via the manage link and **Mark cancelled**.
+**Keeper renewal:** the Decide-by warning appears. If you do nothing, catch-up records the renewal charge on the renewal date. If the price changed, edit that charge's amount and tick **Also set as current price**. To drop the keeper, cancel via the manage link and **Mark cancelled**.
 
 **Reminders:** **Add reminder (.ics)** downloads a one-day event:
 - for rotators, on `access_ends_on`;
@@ -282,6 +295,10 @@ Among inactive, non-archived rotators with at least one open watchlist item, pic
 14. The `.ics` file imports into Google Calendar and Apple Calendar on the correct local date.
 15. All logic functions have passing tests, including month-end clamping, the evening (UTC) date boundary, and amortization remainders.
 16. Usable at 375px width. Only the year grid scrolls sideways, inside its own container.
+
+**Added in v1.5**
+17. **Mark subscribed** with "Also set as current price" ticked records the charge and updates `price_cents` and `price_checked_on` together. If any part fails, nothing is saved.
+18. **Delete period** removes the period and all its charges, and nothing else. Spend no longer counts them.
 
 ## 11. Seed data and setup
 
@@ -364,7 +381,7 @@ Prices are deliberately left blank (except the two I know). Enter what my statem
 - Item 1 shows live progress: how many non-archived services have a price.
 - The checklist can be dismissed (remembered per device) and reopened from the dashboard.
 
-1. For each service, enter `price_cents` and confirm `billing_interval`. A statement is the best source.
+1. For each service, confirm `billing_interval` *before* marking it subscribed: renewal dates and charges depend on it. Enter the price here, or in Mark subscribed (§7.3). A statement is the best source.
 2. For each currently active service, **Mark subscribed** on the date of its *most recent* charge:
    - Spotify, Uzzu, Nintendo, Claude, Google One, Paramount+, Amazon Prime, iCloud+, Netflix, PS Plus.
    - For annual keepers (Nintendo, Google One, Prime), that date may be in 2025. That's what makes their 2026 amortization correct.
