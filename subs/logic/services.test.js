@@ -22,6 +22,16 @@ test('parseCents reads dollars as exact cents', () => {
   }
 });
 
+test('parseCents accepts a comma decimal from comma-locale keyboards', () => {
+  assert.deepEqual(parseCents('12,99'), { value: 1299 });
+  assert.deepEqual(parseCents('12,5'), { value: 1250 });
+  assert.deepEqual(parseCents('$4,35'), { value: 435 });
+  assert.deepEqual(parseCents('12,'), { value: 1200 });
+  for (const ambiguous of ['1,299', '1,299.00', '1,2,3', '12,99.5']) {
+    assert.ok(parseCents(ambiguous).error, ambiguous);
+  }
+});
+
 test('parseCents: blank means unknown', () => {
   assert.deepEqual(parseCents(''), { value: null });
   assert.deepEqual(parseCents('   '), { value: null });

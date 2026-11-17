@@ -28,6 +28,11 @@ const state = {
 let editing = null;
 /** The service open in the delete dialog. */
 let deleting = null;
+/**
+ * True while a dialog's save or delete request is in flight. The dialog stays
+ * open until it finishes, so a failure is shown where the user can see it.
+ */
+let dialogBusy = false;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -78,19 +83,21 @@ const localDay = (timestamp) => todayLocal(new Date(timestamp));
 // ── data ────────────────────────────────────────────────────────────────────
 
 async function load() {
+  let data;
   try {
-    const { services, periods } = await db.loadAll();
-    state.services = services;
-    state.periodsByService = groupByService(periods);
-    state.loaded = true;
-    render();
+    data = await db.loadAll();
   } catch (err) {
     $('#view').innerHTML = `
       <div class="load-error">
         <p>${esc(err.message)}</p>
         <button class="btn" data-action="reload">try again</button>
       </div>`;
+    return;
   }
+  state.services = data.services;
+  state.periodsByService = groupByService(data.periods);
+  state.loaded = true;
+  render();
 }
 
 function upsertLocal(row) {
@@ -108,7 +115,12 @@ function removeLocal(id) {
 
 function currentRoute() {
   const match = /^#\/s\/([^/]+)$/.exec(location.hash);
-  return match ? { view: 'detail', id: decodeURIComponent(match[1]) } : { view: 'dashboard' };
+  if (!match) return { view: 'dashboard' };
+  try {
+    return { view: 'detail', id: decodeURIComponent(match[1]) };
+  } catch {
+    return { view: 'detail', id: null }; // malformed escape, e.g. #/s/% → "doesn't exist"
+  }
 }
 
 function render() {
@@ -392,6 +404,7 @@ function openForm(service = null) {
 }
 
 function closeForm() {
+  if (dialogBusy) return;
   $('#svc-modal').classList.remove('open');
   editing = null;
 }
@@ -437,16 +450,19 @@ async function saveForm(event) {
   const save = $('#svc-save');
   save.disabled = true;
   save.textContent = 'saving…';
-  const wasEditing = !!editing;
+  const previous = editing;
+  dialogBusy = true;
   try {
-    const saved = wasEditing ? await db.updateService(editing.id, row) : await db.insertService(row);
+    const saved = previous ? await db.updateService(previous.id, row) : await db.insertService(row);
     upsertLocal(saved);
+    dialogBusy = false;
     closeForm();
     render();
-    toast(wasEditing ? `saved ${saved.name}` : `added ${saved.name}`);
+    toast(previous ? `saved ${saved.name}` : `added ${saved.name}`);
   } catch (err) {
     $('#svc-error').textContent = err.message;
   } finally {
+    dialogBusy = false;
     save.disabled = false;
     save.textContent = 'save';
   }
@@ -454,33 +470,23 @@ async function saveForm(event) {
 
 // ── archive / restore / delete (SPEC §8.4) ──────────────────────────────────
 
-async function archive(button) {
+/** Archive (archived = true) or restore (false) the button's service. */
+async function setArchived(button, archived) {
   const service = findService(button.dataset.id);
   if (!service) return;
-  const { status } = serviceStatus(state.periodsByService.get(service.id) ?? [], todayLocal());
-  if (!canArchive(status)) {
-    toast('still renewing. mark it cancelled first.', { error: true });
-    return;
+  if (archived) {
+    const { status } = serviceStatus(state.periodsByService.get(service.id) ?? [], todayLocal());
+    if (!canArchive(status)) {
+      toast('still renewing. mark it cancelled first.', { error: true });
+      return;
+    }
   }
   await busy(button, async () => {
     try {
-      upsertLocal(await db.archiveService(service.id));
+      const saved = archived ? await db.archiveService(service.id) : await db.restoreService(service.id);
+      upsertLocal(saved);
       render();
-      toast(`archived ${service.name}`);
-    } catch (err) {
-      toast(err.message, { error: true });
-    }
-  });
-}
-
-async function restore(button) {
-  const service = findService(button.dataset.id);
-  if (!service) return;
-  await busy(button, async () => {
-    try {
-      upsertLocal(await db.restoreService(service.id));
-      render();
-      toast(`restored ${service.name}`);
+      toast(`${archived ? 'archived' : 'restored'} ${service.name}`);
     } catch (err) {
       toast(err.message, { error: true });
     }
@@ -503,11 +509,13 @@ function openDelete(button) {
 }
 
 function closeDelete() {
+  if (dialogBusy) return;
   $('#del-modal').classList.remove('open');
   deleting = null;
 }
 
-const deleteTyped = () => deleting && $('#del-confirm').value.trim() === deleting.name;
+// Both sides trimmed: a name saved with outer spaces (outside the form) must still be deletable.
+const deleteTyped = () => deleting && $('#del-confirm').value.trim() === deleting.name.trim();
 
 async function confirmDelete(event) {
   event.preventDefault();
@@ -516,9 +524,11 @@ async function confirmDelete(event) {
   const go = $('#del-go');
   go.disabled = true;
   go.textContent = 'deleting…';
+  dialogBusy = true;
   try {
     await db.deleteService(service.id);
     removeLocal(service.id);
+    dialogBusy = false;
     closeDelete();
     if (location.hash !== '#/') location.hash = '#/';
     else render();
@@ -527,6 +537,7 @@ async function confirmDelete(event) {
     $('#del-error').textContent = err.message;
     go.disabled = !deleteTyped();
   } finally {
+    dialogBusy = false;
     go.textContent = 'delete forever';
   }
 }
@@ -555,8 +566,8 @@ const ACTIONS = {
     setChecklistDismissed(false);
     render();
   },
-  archive,
-  restore,
+  archive: (el) => setArchived(el, true),
+  restore: (el) => setArchived(el, false),
   delete: openDelete,
   reload: load,
 };
@@ -571,6 +582,10 @@ $('#del-form').addEventListener('submit', confirmDelete);
 $('#del-confirm').addEventListener('input', () => { $('#del-go').disabled = !deleteTyped(); });
 
 window.addEventListener('hashchange', () => {
+  // A dialog belongs to the view it was opened from. While its request is in
+  // flight it stays open (dialogBusy) and closes itself when the request ends.
+  closeForm();
+  closeDelete();
   render();
   window.scrollTo(0, 0);
 });

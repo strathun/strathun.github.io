@@ -44,18 +44,18 @@ export async function insertService(row) {
   return one(unwrap(res, 'add the service'), 'add the service');
 }
 
-export async function updateService(id, row) {
+export async function updateService(id, row, what = 'save the service') {
   const res = await window.sb.from('services').update(row).eq('id', id).select();
-  return one(unwrap(res, 'save the service'), 'save the service');
+  return one(unwrap(res, what), what);
 }
 
 /** Archive (SPEC §8.4): hides the service but keeps its history. */
 export async function archiveService(id) {
-  return updateService(id, { archived_at: new Date().toISOString() });
+  return updateService(id, { archived_at: new Date().toISOString() }, 'archive the service');
 }
 
 export async function restoreService(id) {
-  return updateService(id, { archived_at: null });
+  return updateService(id, { archived_at: null }, 'restore the service');
 }
 
 /** Permanent delete. Foreign keys cascade to periods, charges and watchlist items. */

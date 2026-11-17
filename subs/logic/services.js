@@ -39,14 +39,19 @@ export const SERVICE_FIELDS = Object.keys(NEW_SERVICE);
 
 const MONEY = /^\$?\s*(\d{0,7})(?:\.(\d{0,2}))?$/;
 
+// One comma and at most two digits after it: a comma-decimal keyboard ('12,99').
+// '1,299' is left alone (and rejected): it could be a thousands separator.
+const COMMA_DECIMAL = /^[^.,]*,\d{0,2}$/;
+
 /**
  * Dollars typed by a person → integer cents, without float math.
- * '' → { value: null } (unknown). '12.99' → 1299, '$12' → 1200, '.5' → 50.
- * Negatives, commas and a third decimal place → { error }.
+ * '' → { value: null } (unknown). '12.99' → 1299, '$12' → 1200, '.5' → 50,
+ * '12,99' → 1299. Negatives, thousands commas and a third decimal place → { error }.
  */
 export function parseCents(input) {
-  const s = String(input ?? '').trim();
+  let s = String(input ?? '').trim();
   if (s === '') return { value: null };
+  if (COMMA_DECIMAL.test(s)) s = s.replace(',', '.');
   const match = MONEY.exec(s);
   if (!match || (match[1] === '' && !match[2])) return { error: 'enter a price like 12.99' };
   const dollars = Number(match[1] || '0');
