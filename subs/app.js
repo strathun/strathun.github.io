@@ -177,7 +177,7 @@ function removeLocal(id) {
 // ── routing ─────────────────────────────────────────────────────────────────
 
 function currentRoute() {
-  const year = /^#\/y(?:\/(\d+))?$/.exec(location.hash);
+  const year = /^#\/y(?:\/(\d+))?\/?$/.exec(location.hash);
   if (year) return { view: 'year', year: year[1] ? Number(year[1]) : null };
   const match = /^#\/s\/([^/]+)$/.exec(location.hash);
   if (!match) return { view: 'dashboard' };
@@ -290,10 +290,10 @@ function renderDashboard() {
  * the year view. A past year shows December and its total, with no projection (it
  * equals the total). A future year has no month M, so three of the numbers are blank.
  */
-function spendHtml(year, today, { title, link = false }) {
-  const m = spendMetrics({
-    services: state.services, periods: allRows(state.periodsByService), charges: allRows(state.chargesByService), year, today,
-  });
+function spendHtml(year, today, {
+  title, link = false, periods = allRows(state.periodsByService), charges = allRows(state.chargesByService),
+}) {
+  const m = spendMetrics({ services: state.services, periods, charges, year, today });
   const thisYear = parseYmd(today).y;
   const past = year < thisYear;
   const span = m.month > 1 ? `jan–${MONTH_SHORT[m.month - 1]}` : m.month === 1 ? 'jan' : '';
@@ -480,12 +480,13 @@ function renderYear(requested) {
   const charges = allRows(state.chargesByService);
   const range = yearRange({ periods, charges, today });
   const year = clampYear(requested ?? thisYear, range);
-  // Put the year shown in the address bar (acceptance 22). replaceState fires no hashchange.
-  if (requested !== year) history.replaceState(null, '', yearHref(year));
+  // Put the year shown in the address bar (acceptance 22), also for #/y, #/y/ and #/y/02026.
+  // replaceState fires no hashchange.
+  if (location.hash !== yearHref(year)) history.replaceState(null, '', yearHref(year));
 
   // Links, not buttons, so the back button steps back through the years viewed.
   const step = (to, label) => (to < range.first || to > range.last
-    ? `<span class="btn btn-sm is-disabled" aria-disabled="true">${label}</span>`
+    ? `<span class="btn btn-sm is-disabled" aria-hidden="true">${label}</span>` // no such year: layout only
     : `<a class="btn btn-sm" href="${yearHref(to)}">${label}</a>`);
   const view = yearView({ services: state.services, periods, charges, year, today });
 
@@ -495,12 +496,12 @@ function renderYear(requested) {
       <h1 class="year-title">${year}</h1>
       <nav class="year-switch" aria-label="years">${step(year - 1, `← ${year - 1}`)}${step(year + 1, `${year + 1} →`)}</nav>
     </div>
-    ${spendHtml(year, today, { title: 'spend' })}
+    ${spendHtml(year, today, { title: 'spend', periods, charges })}
     ${gridHtml(view, year, year === thisYear ? view.month : 0)}`;
 }
 
 /** Grid amounts drop the $ to keep twelve columns narrow; the caption says they're dollars. */
-const gridAmount = (cents) => esc(formatCents(cents).replace('$', ''));
+const gridAmount = (cents) => esc(formatCents(cents, { symbol: false }));
 
 /** `nowMonth` is this month's column (1–12) when showing this year, else 0. */
 function gridHtml(view, year, nowMonth) {

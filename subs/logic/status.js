@@ -13,6 +13,13 @@ export function groupByService(rows) {
   return map;
 }
 
+/** Sorts entries shaped { service, … } by service name, ignoring case. */
+export const byName = (a, b) => {
+  const x = a.service.name.toLowerCase();
+  const y = b.service.name.toLowerCase();
+  return x < y ? -1 : x > y ? 1 : 0;
+};
+
 /** Latest started_on wins. On a tie, the uncancelled period wins. */
 export function latestPeriod(periods) {
   let best = null;

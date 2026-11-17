@@ -5,7 +5,7 @@
 // goes back, validating on the way.
 
 import { parseYmd } from './dates.js';
-import { serviceStatus } from './status.js';
+import { serviceStatus, byName } from './status.js';
 import { alertsFor } from './alerts.js';
 
 export const CATEGORIES = ['video', 'music', 'gaming', 'storage', 'shopping', 'ai', 'other'];
@@ -62,14 +62,15 @@ export function parseCents(input) {
 /**
  * 1299 → '$12.99', 123456 → '$1,234.56', null → '—'. Fractional cents (an average,
  * a run rate) round to the nearest cent here, the only place money is rounded (SPEC §7).
+ * { symbol: false } drops the $ (the year grid, whose caption says it's dollars).
  */
-export function formatCents(cents) {
+export function formatCents(cents, { symbol = true } = {}) {
   if (cents == null) return '—';
   const whole = Math.round(cents);
   const sign = whole < 0 ? '-' : '';
   const abs = Math.abs(whole);
   const dollars = String(Math.floor(abs / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `${sign}$${dollars}.${String(abs % 100).padStart(2, '0')}`;
+  return `${sign}${symbol ? '$' : ''}${dollars}.${String(abs % 100).padStart(2, '0')}`;
 }
 
 /** 1299 → '12.99', the form's way of showing a price. null → ''. */
@@ -211,13 +212,6 @@ export function findNameConflict(services, name, exceptId = null) {
 }
 
 // ── dashboard ───────────────────────────────────────────────────────────────
-
-/** Sorts entries shaped { service, … } by service name, ignoring case. */
-export const byName = (a, b) => {
-  const x = a.service.name.toLowerCase();
-  const y = b.service.name.toLowerCase();
-  return x < y ? -1 : x > y ? 1 : 0;
-};
 
 /**
  * Dashboard groups (SPEC §8.1), each sorted by name. Entries are

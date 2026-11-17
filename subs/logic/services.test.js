@@ -59,6 +59,8 @@ test('formatCents rounds fractional cents to the nearest cent, only for display 
   assert.equal(formatCents(833.5), '$8.34');
   assert.equal(formatCents(12000.000000000002), '$120.00', 'float noise from summed run rates');
   assert.equal(formatCents(-0.4), '$0.00', 'no negative zero');
+  assert.equal(formatCents(123456, { symbol: false }), '1,234.56', 'the year grid drops the $');
+  assert.equal(formatCents(-833, { symbol: false }), '-8.33');
 });
 
 test('centsToInput round-trips through parseCents', () => {

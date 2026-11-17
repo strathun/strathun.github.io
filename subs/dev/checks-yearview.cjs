@@ -180,6 +180,10 @@ const TILES_2027 = { values: ['—', '—', '—'], subs: ['projected $430.76 if
   check('acceptance 22: #/y/1999 shows the nearest year, 2025, and the URL follows', (await shown()) === '2025' && (await page.evaluate(() => location.hash)) === '#/y/2025');
   await year('#/y/3000');
   check('acceptance 22: #/y/3000 shows 2027', (await shown()) === '2027');
+  for (const typed of ['#/y/02026', '#/y/2026/', '#/y/']) {
+    await year(typed);
+    check(`${typed} shows 2026 with the URL tidied to #/y/2026`, (await shown()) === '2026' && (await page.evaluate(() => location.hash)) === '#/y/2026');
+  }
 
   // 7. back button: dashboard → year view → previous year → back, back
   await page.goto(BASE + '#/');

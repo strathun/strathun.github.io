@@ -2,8 +2,7 @@
 
 import { effectiveMonth, monthStart, monthEnd, parseYmd } from './dates.js';
 import { slicesInYear, monthlyTotals } from './amortize.js';
-import { accessEnd, groupByService } from './status.js';
-import { byName } from './services.js';
+import { accessEnd, groupByService, byName } from './status.js';
 
 /** Access window [start, end] for a period; a renewing period runs to today. */
 function accessWindow(period, today) {
