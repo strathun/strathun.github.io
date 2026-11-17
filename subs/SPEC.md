@@ -1,8 +1,12 @@
 # Subscription Rotation Tracker — Spec
 
-Status: Draft v1.6 · Owner: Hunter · Route: `strathun.github.io/subs/`
+Status: Draft v1.7 · Owner: Hunter · Route: `strathun.github.io/subs/`
 
 **Changelog**
+- v1.7 (2026-11-17): settled the alerts gaps before building step 4's alerts slice.
+  - A service with an uncancelled period is `renewing`, even when a later period was cancelled. Catch-up still bills that period, so Cancel now, Decide by, the dashboard group, the Archive guard, the projection and Next up all follow it (§7.1).
+  - Cancel now and Decide by say when the renewing period started before another one, the usual sign of a backfill left uncancelled (§7.2).
+  - The dashboard Alerts list: order, what each alert offers, hidden when empty (§8.1).
 - v1.6 (2026-11-17): rules settled while building step 4's data entry.
   - Mark subscribed refuses an archived service, a billing interval that changed since the page loaded, and a date so far back that catch-up would record over 1000 renewals (§7.3).
   - A $0 charge offers "Also set as current price" unticked, so a free trial doesn't become the price (§7.3).
@@ -158,11 +162,11 @@ All of this lives in `subs/logic/`, one module per subsection (`dates.js`, `stat
 
 **Month M** for a selected year Y is today's month when Y is the current year, 12 for a past year, and 0 for a future year.
 
-### 7.1 Status (per service, from its latest period, given `today`)
-The latest period is the one with the latest `started_on`.
-- `renewing`: latest period has `cancelled_on` null.
-- `ending`: `cancelled_on` set and access end `>= today`. Show "Active until {date}".
-- `inactive`: no periods, or access end `< today`.
+### 7.1 Status (per service, given `today`)
+- `renewing`: a period has `cancelled_on` null (at most one can, §6). Status comes from that period even when a later period was cancelled, because catch-up still bills it (§7.3). That happens when a backfilled older period is left uncancelled ("Not now" on the §9 prompt).
+- Otherwise status comes from the latest period, the one with the latest `started_on`:
+  - `ending`: access end `>= today`. Show "Active until {date}".
+  - `inactive`: no periods, or access end `< today`.
 
 Access end is `access_ends_on`, or `renews_on - 1 day` if it was left blank.
 
@@ -170,6 +174,7 @@ Access end is `access_ends_on`, or `renews_on - 1 day` if it was left blank.
 Archived services show no alerts.
 - **Cancel now**: `role = rotator` and status `renewing`.
 - **Decide by {date}**: `role = keeper`, status `renewing`, and the decide-by date (`renews_on - cancel_lead_days`) is 14 days away or less. It stays up after that date passes, until the renewal is recorded.
+- Both use the renewing period (§7.1). When it started before another period, the alert says so, since that's usually a backfill left uncancelled. Mark cancelled or Delete period fixes it.
 - **Verify link**: `url_verified = false`.
 - **Price unknown**: `price_cents` is null.
 - **Check price**: `price_cents` is set and `price_checked_on` is blank or more than 180 days old.
@@ -240,7 +245,9 @@ Among inactive, non-archived rotators with at least one open watchlist item, pic
 
 1. **Dashboard**
    - Spend tiles: This month · Average monthly · This year so far / projected (with cash paid as secondary text).
-   - Alerts.
+   - **Alerts**: Cancel now, Decide by and Amount unknown for every non-archived service, in that order. Cancel now is sorted by next charge date, Decide by by its date (so passed ones come first), Amount unknown by name; ties go by name. Hidden when there are none.
+     - Each names its service and links to its detail.
+     - Cancel now and Decide by offer the manage link and **Mark cancelled** in place, so acting on one doesn't mean leaving the dashboard. Amount unknown links to the service's charges.
    - Services grouped as Active (renewing), Active until… (ending), Inactive.
    - Every row shows the current price and interval, including inactive ones.
    - Every row shows its service-level alerts (Verify link, Price unknown, Check price) as badges. Cancel now, Decide by and Amount unknown appear in Alerts.
@@ -310,6 +317,10 @@ Among inactive, non-archived rotators with at least one open watchlist item, pic
 **Added in v1.5**
 17. **Mark subscribed** with "Also set as current price" ticked records the charge and updates `price_cents` and `price_checked_on` together. If any part fails, nothing is saved.
 18. **Delete period** removes the period and all its charges, and nothing else. Spend no longer counts them.
+
+**Added in v1.7**
+19. A service with an uncancelled period started before a cancelled one shows as Active, gets Cancel now (rotator) or Decide by (keeper) naming that period, and can't be archived.
+20. **Mark cancelled** from a Cancel-now alert clears the alert without leaving the dashboard.
 
 ## 11. Seed data and setup
 
