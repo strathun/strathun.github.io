@@ -68,7 +68,7 @@ const SEED = {
   await dashboard();
   const list = await alerts();
   const want = [
-    { name: 'Hulu', tag: 'cancel now', text: 'next charge dec 1 · the mar 1 period was never cancelled', actions: ['manage ↗', 'mark cancelled'] },
+    { name: 'Hulu', tag: 'cancel now', text: 'next charge dec 1 · the mar 1 period was never cancelled', actions: ['review periods'] },
     { name: 'iCloud+', tag: 'cancel now', text: 'next charge dec 10', actions: ['mark cancelled'] },
     { name: 'Netflix', tag: 'cancel now', text: 'next charge dec 10', actions: ['manage ↗', 'mark cancelled'] },
     { name: 'Nintendo Switch Online', tag: 'decide by nov 15', text: 'that date has passed · renews nov 17 at $21.00 / yr', actions: ['manage ↗', 'mark cancelled'] },
@@ -92,9 +92,10 @@ const SEED = {
 
   // 2. acceptance 19: the open Mar 1 period makes Hulu active, and it can't be archived
   check('acceptance 19: Hulu is in the active group', (await groups()).active.includes('Hulu'), JSON.stringify(await groups()));
-  await page.click(`${alertFor('Hulu')} .alert-name`);
+  await page.click(`${alertFor('Hulu')} a.btn`);
   await page.waitForFunction(() => document.querySelector('.detail-name')?.textContent === 'Hulu');
-  check('acceptance 19: detail says renewing, archive is off', (await text('.detail-status')) === 'active · renews dec 1' && !(await page.isEnabled('[data-action="archive"]')));
+  check('acceptance 19: review periods opens the detail, archive is off', (await text('.detail-status')) === 'active · renews dec 1' && !(await page.isEnabled('[data-action="archive"]')));
+  check('acceptance 19: history shows the open mar 1 period with its delete', (await text('.period.is-open .period-head')) === 'mar 1 → renewing next charge dec 1 delete…');
   check('acceptance 19: mark cancelled offered for the open period', await page.isVisible('.btn-primary[data-action="cancel"]'));
   await page.goBack();
   await page.waitForSelector('.alerts');

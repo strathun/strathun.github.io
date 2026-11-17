@@ -295,11 +295,18 @@ function alertParts({ service, alert }, today) {
   return { tag: 'amount unknown', text: `${n} charge${n === 1 ? ' has' : 's have'} no amount` };
 }
 
-/** Act on the alert in place: the manage page, then Mark cancelled (§8.1). */
+/**
+ * Act on the alert in place: the manage page, then Mark cancelled (§8.1). An older
+ * period left open has had renewals recorded since, so cancelling it now would keep
+ * them: send it to the history, where Delete period fixes it.
+ */
 function alertActionsHtml({ service, alert }) {
   const name = esc(service.name);
   if (alert.type === 'amount_unknown') {
     return `<a class="btn btn-sm" href="${detailHref(service.id)}" aria-label="edit ${name}'s charges">edit charges</a>`;
+  }
+  if (alert.olderStart) {
+    return `<a class="btn btn-sm" href="${detailHref(service.id)}" aria-label="review ${name}'s periods">review periods</a>`;
   }
   const manage = isWebUrl(service.manage_url)
     ? `<a class="btn btn-sm" href="${esc(service.manage_url)}" target="_blank" rel="noopener noreferrer" aria-label="open ${name}'s manage page">manage ↗</a>`
