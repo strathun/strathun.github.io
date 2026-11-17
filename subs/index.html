@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>subscriptions — strathun</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css">
+<!--
+  Subscription tracker. Spec: subs/SPEC.md. Schema + RLS: subs/schema.sql
+  (verify with subs/rls-test.sql). Rules live in subs/logic/ and are unit-tested
+  (cd subs && node --test). This page only renders what they return.
+-->
+<style>
+  .subs { max-width: 760px; margin: 0 auto; padding: 16px 16px 60px; }
+
+  /* ── header ── */
+  .subs-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 20px;
+  }
+  .subs-title { font-size: 16px; font-weight: 600; }
+  .subs-title small { color: var(--muted); font-size: 12px; margin-left: 8px; font-weight: 400; }
+
+  .btn {
+    display: inline-block; background: var(--bg2); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 14px; border-radius: var(--radius);
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600; line-height: 1.4;
+    cursor: pointer; transition: opacity .15s, border-color .15s;
+  }
+  .btn:hover { border-color: var(--border2); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--text); }
+  .btn-primary:hover { opacity: .88; border-color: var(--accent); }
+  .btn-danger {
+    color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+  }
+  .btn-danger:hover { border-color: var(--danger); }
+  .link-btn {
+    background: none; border: none; padding: 4px 0; margin-bottom: 12px; cursor: pointer;
+    font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+  }
+  .link-btn:hover { color: var(--text); }
+  .muted { color: var(--muted); }
+  .small { font-size: 11px; }
+
+  /* ── service groups ── */
+  .group { margin-bottom: 24px; }
+  .group-title {
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px;
+  }
+  .group-title small { color: var(--dim); font-size: 11px; margin-left: 6px; }
+  .service-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+
+  .service-row {
+    width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 12px; align-items: center; text-align: left;
+    background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 12px; color: var(--text); font-family: var(--font-mono);
+    cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .service-row:hover { border-color: var(--border2); background: var(--bg2); opacity: 1; }
+  .service-row.is-archived { opacity: .65; }
+  .service-row.is-archived:hover { opacity: 1; }
+  .service-row:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+  .row-main { min-width: 0; }
+  .row-name {
+    display: block; font-size: 13px; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row-sub { display: block; font-size: 11px; color: var(--muted); }
+  .row-sub .role-keeper { color: var(--accent2); }
+  .row-sub .role-rotator { color: var(--accent); }
+  .row-side { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .row-price { display: block; white-space: nowrap; }
+  .row-until { display: block; font-size: 11px; color: var(--warn); white-space: nowrap; }
+  .row-badges { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .badge {
+    font-size: 10px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--border2); color: var(--muted); white-space: nowrap;
+  }
+  .badge-warn {
+    color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+    background: color-mix(in srgb, var(--warn) 8%, transparent);
+  }
+  .badge-muted { border-style: dashed; }
+
+  /* ── service detail ── */
+  .back { display: inline-block; font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+  .back:hover { color: var(--text); opacity: 1; }
+  .detail {
+    background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 18px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .detail-name { font-size: 18px; font-weight: 600; overflow-wrap: anywhere; line-height: 1.3; }
+  .detail-head .row-sub { margin-top: 4px; }
+  .detail-status { font-size: 13px; }
+  .status-renewing { color: var(--accent2); }
+  .status-ending { color: var(--warn); }
+  .status-inactive, .status-archived { color: var(--muted); }
+  .detail-section p + p { margin-top: 8px; }
+  .detail-links { display: flex; flex-wrap: wrap; gap: 8px; }
+  .detail-links + .manage-path, .detail-links + p, .manage-path + p { margin-top: 10px; }
+  .manage-path {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px 11px; font-size: 12px; overflow-wrap: anywhere;
+  }
+  .manage-path .field-label { margin-bottom: 2px; }
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; font-size: 13px; }
+  .kv dt {
+    color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; padding-top: 3px;
+  }
+  .kv dd { overflow-wrap: anywhere; }
+  .kv .notes { white-space: pre-wrap; }
+  .detail-actions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    border-top: 1px solid var(--border); padding-top: 14px;
+  }
+  .detail-actions p { flex-basis: 100%; }
+
+  /* ── setup checklist ── */
+  .checklist {
+    background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 14px 16px; margin-bottom: 24px;
+  }
+  .checklist-head { display: flex; align-items: baseline; justify-content: space-between; }
+  .checklist-head .group-title { margin-bottom: 6px; }
+  .checklist-head .link-btn { margin: 0; }
+  .checklist ol { padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+  .checklist li::marker { color: var(--muted); }
+  .checklist li.done { color: var(--muted); }
+  .checklist li.done::marker { content: '✓  '; color: var(--accent2); }
+  .checklist .progress, .checklist .later { display: block; font-size: 11px; margin-top: 2px; }
+  .checklist .progress { color: var(--warn); }
+  .checklist li.done .progress { color: var(--accent2); }
+  .checklist .later { color: var(--muted); font-style: italic; }
+  .empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+  .empty, .loading-msg, .load-error {
+    text-align: center; padding: 40px 20px; color: var(--muted); font-size: 12px;
+    border: 1px dashed var(--border); border-radius: var(--radius-lg);
+  }
+  .empty p + p, .load-error .btn { margin-top: 12px; }
+  .load-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+
+  /* ── modal ── */
+  .overlay {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: color-mix(in srgb, var(--bg) 80%, transparent);
+    align-items: center; justify-content: center; padding: 16px;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 20px; width: 100%; max-width: 460px; max-height: 92vh; overflow-y: auto;
+  }
+  .modal-title {
+    font-size: 15px; font-weight: 600; margin-bottom: 16px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .close-btn {
+    background: none; border: none; color: var(--muted); font-size: 22px;
+    line-height: 1; cursor: pointer; padding: 0 4px;
+  }
+  .close-btn:hover { color: var(--text); }
+
+  .field { margin-bottom: 14px; min-width: 0; }
+  .field > label:not(.check), .field-label {
+    display: block; font-size: 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px;
+  }
+  .field input:not([type="checkbox"]):not([type="radio"]), .field select, .field textarea {
+    background: var(--bg2); border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius); padding: 9px 11px; font-size: 13px;
+    font-family: var(--font-mono); width: 100%; outline: none; transition: border .15s;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
+  .field [aria-invalid="true"] { border-color: var(--danger) !important; }
+  .field input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(.5); cursor: pointer; }
+  .field textarea { resize: vertical; min-height: 72px; }
+  .field-hint { font-size: 11px; color: var(--muted); margin-top: 5px; }
+  .price-hint { margin: -8px 0 14px; }
+  .field-error { font-size: 11px; color: var(--danger); margin-top: 5px; }
+  .field-error:empty { display: none; }
+
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+  @media (max-width: 360px) { .row2 { grid-template-columns: 1fr; } }
+
+  .pills { display: flex; gap: 8px; }
+  .pills input { position: absolute; opacity: 0; pointer-events: none; }
+  .pills label {
+    flex: 1; padding: 8px; border-radius: var(--radius); text-align: center;
+    background: var(--bg2); border: 1px solid var(--border); color: var(--muted);
+    font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s;
+  }
+  .pills label:hover { border-color: var(--border2); color: var(--text); }
+  .pills input:focus-visible + label { outline: 1px solid var(--accent); outline-offset: 1px; }
+  .pills input[value="keeper"]:checked + label {
+    color: var(--accent2); border-color: color-mix(in srgb, var(--accent2) 50%, transparent);
+    background: color-mix(in srgb, var(--accent2) 8%, transparent);
+  }
+  .pills input[value="rotator"]:checked + label {
+    color: var(--accent); border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+
+  .check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); cursor: pointer; }
+  .check input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+  .modal-error { font-size: 12px; color: var(--danger); min-height: 16px; margin-top: 4px; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 12px; }
+  .modal-actions .btn { padding: 10px 14px; font-size: 13px; }
+  .modal-actions .btn-primary, .modal-actions .btn-danger { flex: 1; }
+  .del-warning { margin-bottom: 14px; }
+  .del-warning strong { color: var(--text); }
+
+  /* ── toast ── */
+  .toast {
+    position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 18px; font-size: 13px; color: var(--text); z-index: 300;
+    opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100vw - 32px);
+  }
+  .toast.show { opacity: 1; }
+  .toast.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+</style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="logo"><a href="/" style="color:inherit;text-decoration:none">str<span style="color:var(--accent)">@</span>thun</a></div>
+  <div class="nav-links">
+    <a href="/">hub</a>
+    <a href="/games/">games</a>
+    <a href="/games/library/">library</a>
+    <a href="/travel/">travel</a>
+    <a href="/subs/" class="active">subs</a>
+  </div>
+  <div class="nav-user">
+    <span id="nav-email"></span>
+    <button onclick="window.signOut()">sign out</button>
+  </div>
+</nav>
+
+<div id="auth-gate" class="hidden"></div>
+
+<div id="app" class="hidden">
+  <main class="subs">
+    <div id="view"><div class="loading-msg">loading…</div></div>
+  </main>
+</div>
+
+<!-- ── Add / edit service (SPEC §8.4) ── -->
+<div class="overlay" id="svc-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="svc-title">
+    <div class="modal-title">
+      <span id="svc-title">new service</span>
+      <button class="close-btn" type="button" data-action="close-form" aria-label="close">×</button>
+    </div>
+
+    <form id="svc-form" novalidate autocomplete="off">
+      <div class="field">
+        <label for="f-name">name</label>
+        <input id="f-name" name="name" type="text" maxlength="100" placeholder="Netflix">
+        <div class="field-error" data-for="name"></div>
+      </div>
+
+      <div class="field">
+        <span class="field-label">role</span>
+        <div class="pills" role="radiogroup" aria-label="role">
+          <input type="radio" id="f-role-rotator" name="role" value="rotator"><label for="f-role-rotator">rotator</label>
+          <input type="radio" id="f-role-keeper" name="role" value="keeper"><label for="f-role-keeper">keeper</label>
+        </div>
+        <div class="field-hint">rotators come and go. keepers stay year-round and renew automatically.</div>
+        <div class="field-error" data-for="role"></div>
+      </div>
+
+      <div class="row2">
+        <div class="field">
+          <label for="f-category">category</label>
+          <select id="f-category" name="category"></select>
+          <div class="field-error" data-for="category"></div>
+        </div>
+        <div class="field">
+          <label for="f-interval">billed</label>
+          <select id="f-interval" name="billing_interval"></select>
+          <div class="field-error" data-for="billing_interval"></div>
+        </div>
+      </div>
+
+      <div class="row2">
+        <div class="field">
+          <label for="f-price">price ($)</label>
+          <input id="f-price" name="price" type="text" inputmode="decimal" placeholder="unknown">
+          <div class="field-error" data-for="price"></div>
+        </div>
+        <div class="field">
+          <label for="f-checked">price checked on</label>
+          <input id="f-checked" name="price_checked_on" type="date">
+          <div class="field-error" data-for="price_checked_on"></div>
+        </div>
+      </div>
+      <div class="field-hint price-hint">changing the price sets "checked on" to today, unless you change that date too.</div>
+
+      <div class="field">
+        <label for="f-manage">manage / cancel page</label>
+        <input id="f-manage" name="manage_url" type="url" inputmode="url" placeholder="https://…">
+        <div class="field-error" data-for="manage_url"></div>
+      </div>
+
+      <div class="field">
+        <label class="check"><input type="checkbox" name="url_verified"> link verified (the browser really lands there)</label>
+      </div>
+
+      <div class="field">
+        <label for="f-path">manage path (no web page)</label>
+        <input id="f-path" name="manage_path" type="text" placeholder="iPhone Settings → …">
+      </div>
+
+      <div class="field">
+        <label for="f-help">how-to-cancel article</label>
+        <input id="f-help" name="help_url" type="url" inputmode="url" placeholder="https://…">
+        <div class="field-error" data-for="help_url"></div>
+      </div>
+
+      <div class="field">
+        <label for="f-lead">cancel lead days</label>
+        <input id="f-lead" name="cancel_lead_days" type="text" inputmode="numeric" placeholder="1">
+        <div class="field-hint">how many days before renewal you must cancel to avoid the next charge.</div>
+        <div class="field-error" data-for="cancel_lead_days"></div>
+      </div>
+
+      <div class="field">
+        <label for="f-notes">notes</label>
+        <textarea id="f-notes" name="notes"></textarea>
+      </div>
+
+      <div class="modal-error" id="svc-error" role="alert"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-form">cancel</button>
+        <button class="btn btn-primary" type="submit" id="svc-save">save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Delete permanently (SPEC §8.4): archived services only, typed confirmation ── -->
+<div class="overlay" id="del-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="del-title">
+    <div class="modal-title">
+      <span id="del-title">delete permanently</span>
+      <button class="close-btn" type="button" data-action="close-delete" aria-label="close">×</button>
+    </div>
+    <form id="del-form" novalidate autocomplete="off">
+      <p class="small muted del-warning">
+        this removes <strong id="del-name"></strong> with all its periods,
+        charges and watchlist, and changes past spend. it can't be undone. leaving it archived keeps the history.
+      </p>
+      <div class="field">
+        <label for="del-confirm">type the service name to confirm</label>
+        <input id="del-confirm" type="text" spellcheck="false" autocapitalize="off">
+      </div>
+      <div class="modal-error" id="del-error" role="alert"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-delete">cancel</button>
+        <button class="btn btn-danger" type="submit" id="del-go" disabled>delete forever</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/assets/auth.js"></script>
+<script type="module" src="/subs/app.js"></script>
+</body>
+</html>

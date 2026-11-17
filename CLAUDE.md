@@ -34,7 +34,10 @@ strathun.github.io/
 │   ├── SPEC.md          # Behavior spec: source of truth for logic and acceptance criteria
 │   ├── schema.sql       # Tables + RLS (rls-test.sql verifies it)
 │   ├── package.json     # Marks subs/ as ES modules for node --test; not a build
-│   └── logic/           # Pure logic (SPEC §7) + *.test.js, no DOM or Supabase
+│   ├── index.html       # Markup + styles; loads app.js as a module
+│   ├── app.js           # Rendering, hash routes (#/ dashboard, #/s/{id} detail), events
+│   ├── db.js            # Supabase calls; throws DbError so the page can show it
+│   └── logic/           # Pure logic (SPEC §7, service form, starter list) + *.test.js, no DOM or Supabase
 ├── runs/                # Public share pages (see "Public pages" below)
 │   ├── dead-horse/      # Dead Horse 50K training map: index.html + routes.json
 │   └── tools/
@@ -86,6 +89,10 @@ for page chrome, JetBrains Mono, vanilla JS, errors surfaced inline.
 
 **Aesthetic:** Dark, minimal, monospace. Programmer IDE meets personal dashboard.
 Avoid gradients, heavy shadows, or flashy effects. Precision and readability over decoration.
+
+**Shared nav:** when the nav itself is under 700px wide, its links move to a second row and a long
+email shortens with an ellipsis. This is a container query in `assets/style.css`, so it also covers pages with
+a narrow body (games: 480px) on desktop. Don't add per-page nav overrides; check new nav links at 375px.
 
 ---
 
@@ -230,6 +237,11 @@ No build step. CI only runs tests; it doesn't deploy.
 - **No external JS libraries** unless there's a strong reason. If needed, load from `cdn.jsdelivr.net` or `cdnjs.cloudflare.com`.
 - **Active session state** (e.g. a running timer) uses `localStorage` as a temporary store since it doesn't need to survive across devices. Persistent user data always goes to Supabase.
 - **Error handling:** always surface errors to the user via a toast or inline message — never silently swallow them.
+- **Supabase writes:** an update or delete that RLS blocks (or whose id is gone) returns no error and zero rows.
+  Chain `.select()` and treat zero rows as a failure, as `subs/db.js` does.
+- **Module pages** (`<script type="module">`, e.g. `subs/app.js`): their functions aren't globals, so use
+  `data-action` attributes and one delegated click listener instead of `onclick="…"`. Modules don't load from
+  `file://`, so use the local server.
 - **Testable logic:** when an app has real rules (dates, money, state), put them in `<app>/logic/` as ES modules
   that take plain rows and `today` as arguments, with a `*.test.js` beside each. Pages load them with
   `<script type="module">`. Logic never touches the DOM or Supabase and never calls `toISOString()`
@@ -269,5 +281,6 @@ No build step. CI only runs tests; it doesn't deploy.
 
 - No dark/light mode toggle (always dark)
 - No push notifications / reminders
-- Mobile nav on hub page could be improved for 10+ apps
+- With many more apps, the nav's link row scrolls sideways inside the nav on phones; a menu may be better
+- Hub greeting (`#display-name`) doesn't wrap, so an email prefix of 24+ characters overflows at 375px
 - Consider a `_template/` folder with a starter boilerplate for new apps

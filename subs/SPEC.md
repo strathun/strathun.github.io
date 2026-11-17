@@ -1,8 +1,14 @@
 # Subscription Rotation Tracker — Spec
 
-Status: Draft v1.3 · Owner: Hunter · Route: `strathun.github.io/subs/`
+Status: Draft v1.4 · Owner: Hunter · Route: `strathun.github.io/subs/`
 
 **Changelog**
+- v1.4 (2026-11-17): settled the services-screen gaps before building step 3.
+  - Archive is disabled while a service is renewing, so its charges can't continue unseen (§8.4).
+  - Changing a price fills in `price_checked_on` with today unless you set the date (§8.4).
+  - Service detail has its own URL, so the phone back button works (§8.3).
+  - Dashboard rows show service-level alerts as badges (§8.1).
+  - Setup checklist shows pricing progress, and can be dismissed and reopened (§11).
 - v1.3 (2026-11-16): settled the §7 edge cases before writing the logic tests.
   - Renewals land on the start day, clamped to month end, so month-end starts don't drift (§7.3).
   - Projection adds run rate month by month, only where nothing is already committed (§7.5).
@@ -217,15 +223,20 @@ Among inactive, non-archived rotators with at least one open watchlist item, pic
    - Alerts.
    - Services grouped as Active (renewing), Active until… (ending), Inactive.
    - Every row shows the current price and interval, including inactive ones.
+   - Every row shows its service-level alerts (Verify link, Price unknown, Check price) as badges. Cancel now, Decide by and Amount unknown appear in Alerts.
    - "Next up" card.
 2. **Year view**: the §7.6 grid with a year switcher. On a phone it scrolls horizontally inside its own container, with the service-name column sticky. The page itself never scrolls sideways.
-3. **Service detail**
+3. **Service detail** (its own URL, `#/s/{id}`, so the browser back button returns to the dashboard)
    - Status, the **Open manage page** button, help link, price ("checked {date}"), notes.
    - Period history, charges (amounts editable, `auto` ones badged), watchlist.
    - Actions: **Mark subscribed**, **Mark cancelled**, **Add reminder (.ics)**, Edit, Archive.
 4. **Add / edit / remove services**
-   - **Add**: a form for all `services` fields.
+   - **Add / Edit**: a form for all `services` fields.
+     - Prices are typed in dollars (`12.99`) and stored as exact integer cents.
+     - Changing the price fills in `price_checked_on` with today, unless you set that date yourself.
+     - Names are unique (case-insensitive), archived services included. If the match is archived, the form says to restore it instead.
    - **Archive** is the default way to remove a service. It hides the service from the dashboard but keeps its history, so past spend stays correct. Archived services are listed under a "Show archived" toggle and can be restored.
+     - Archive is disabled while the service is `renewing`. Mark it cancelled first. An archived service shows no alerts (§7.2), so a renewing one would keep charging unseen.
    - **Delete permanently** is only offered for archived services. It needs a typed confirmation and removes the service's periods, charges and watchlist.
 5. **First run**: if there are zero services, show **Load starter list**, which inserts §11 once, then the §11 setup checklist.
 
@@ -350,6 +361,8 @@ Prices are deliberately left blank (except the two I know). Enter what my statem
 ```
 
 **First-run setup checklist** (shown in the app after loading the starter list):
+- Item 1 shows live progress: how many non-archived services have a price.
+- The checklist can be dismissed (remembered per device) and reopened from the dashboard.
 
 1. For each service, enter `price_cents` and confirm `billing_interval`. A statement is the best source.
 2. For each currently active service, **Mark subscribed** on the date of its *most recent* charge:
