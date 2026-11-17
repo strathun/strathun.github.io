@@ -1,8 +1,13 @@
 # Subscription Rotation Tracker — Spec
 
-Status: Draft v1.7 · Owner: Hunter · Route: `strathun.github.io/subs/`
+Status: Draft v1.8 · Owner: Hunter · Route: `strathun.github.io/subs/`
 
 **Changelog**
+- v1.8 (2026-11-17): settled the spend and year view gaps before building step 5.
+  - The dashboard's spend tiles show the current year. The year view shows the same tiles for its selected year, which is where §7.5's past and future years appear. A past year shows December and the year total, with no projection (§8.1, §8.2).
+  - Fractional amounts (average, run rate, projection) are rounded to the nearest cent only when shown (§7).
+  - The year view has its own URL, `#/y/{year}`. It offers the years from the first period or charge through next year (§8.2).
+  - Year view rows are sorted by name and link to their service. Archived ones are marked (§8.2).
 - v1.7 (2026-11-17): settled the alerts gaps before building step 4's alerts slice.
   - A service with an uncancelled period is `renewing`, even when a later period was cancelled. Catch-up still bills that period, so Cancel now, Decide by, the dashboard group, the Archive guard, the projection and Next up all follow it (§7.1).
   - Cancel now and Decide by say when the renewing period started before another one, the usual sign of a backfill left uncancelled, and link to the period history to fix it. A keeper's shows whatever the 14-day window says (§7.2, §8.1).
@@ -159,7 +164,7 @@ Unique index on `(period_id, charged_on)`. This makes automatic renewal recordin
 
 All of this lives in `subs/logic/`, one module per subsection (`dates.js`, `status.js`, `alerts.js`, `periods.js`, `amortize.js`, `spend.js`, `yearview.js`, `nextup.js`). The modules make no DOM or Supabase calls, take `today` as an argument, and read rows exactly as Supabase returns them. Run the tests with `cd subs && node --test`. The UI only renders what these return.
 
-**Dates** are local calendar dates (`YYYY-MM-DD` from local date parts, never `toISOString()`). Month math clamps to month end (Jan 31 + 1 month = Feb 28/29). Money is integer cents. Round only for display.
+**Dates** are local calendar dates (`YYYY-MM-DD` from local date parts, never `toISOString()`). Month math clamps to month end (Jan 31 + 1 month = Feb 28/29). Money is integer cents. Round only for display, to the nearest cent: the average, run rate and projection can be fractional.
 
 **Month M** for a selected year Y is today's month when Y is the current year, 12 for a past year, and 0 for a future year.
 
@@ -246,7 +251,7 @@ Among inactive, non-archived rotators with at least one open watchlist item, pic
 ## 8. Screens
 
 1. **Dashboard**
-   - Spend tiles: This month · Average monthly · This year so far / projected (with cash paid as secondary text).
+   - Spend tiles for the current year: This month · Average monthly · This year so far / projected (with cash paid as secondary text). They link to the year view.
    - **Alerts**: Cancel now, Decide by and Amount unknown for every non-archived service, in that order. Cancel now is sorted by next charge date, Decide by by its date (so passed ones come first), Amount unknown by name; ties go by name. Hidden when there are none.
      - Each names its service and links to its detail.
      - Cancel now and Decide by offer the manage link and **Mark cancelled** in place, so acting on one doesn't mean leaving the dashboard. For an older period left open (§7.2), they link to the period history instead. Amount unknown links to the service's charges.
@@ -254,7 +259,11 @@ Among inactive, non-archived rotators with at least one open watchlist item, pic
    - Every row shows the current price and interval, including inactive ones.
    - Every row shows its service-level alerts (Verify link, Price unknown, Check price) as badges. Cancel now, Decide by and Amount unknown appear in Alerts.
    - "Next up" card.
-2. **Year view**: the §7.6 grid with a year switcher. On a phone it scrolls horizontally inside its own container, with the service-name column sticky. The page itself never scrolls sideways.
+2. **Year view** (its own URL, `#/y/{year}`; `#/y` is this year)
+   - A year switcher: previous and next are links, so the back button steps back through the years viewed. It offers the years from the earliest period or charge through next year (which shows committed slices and the projection). A year outside that range shows the nearest one.
+   - The spend tiles for the selected year (§7.5). For a past year, "this month" is December and so far is the year total. The projection is left out, since it equals the total. For a future year, this month, average and so far are blank.
+   - The §7.6 grid. Rows are sorted by name and link to their service; archived ones are marked. Active months are shaded, and months after M are muted. A totals row closes it.
+   - On a phone it scrolls horizontally inside its own container, with the service-name column sticky. The page itself never scrolls sideways.
 3. **Service detail** (its own URL, `#/s/{id}`, so the browser back button returns to the dashboard)
    - Status, the **Open manage page** button, help link, price ("checked {date}"), notes.
    - Period history. **Delete period** removes the period and its charges in one transaction (§6), after a confirmation that lists the charges it removes. It's how a backfill mistake is fixed: to change a start date, delete the period and mark subscribed again.
@@ -323,6 +332,10 @@ Among inactive, non-archived rotators with at least one open watchlist item, pic
 **Added in v1.7**
 19. A service with an uncancelled period started before a cancelled one shows as Active, gets Cancel now (rotator) or Decide by (keeper) naming that period, and can't be archived.
 20. **Mark cancelled** from a Cancel-now alert clears the alert without leaving the dashboard.
+
+**Added in v1.8**
+21. On the year view for a past year, the year total equals the sum of the totals row, and no projection is shown.
+22. `#/y/{year}` opens the year view for that year. A year outside the offered range shows the nearest one.
 
 ## 11. Seed data and setup
 
