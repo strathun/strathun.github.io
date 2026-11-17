@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   todayLocal, addDays, addMonths, addInterval, daysBetween,
-  daysInMonth, monthKey, effectiveMonth, parseYmd,
+  daysInMonth, monthKey, effectiveMonth, parseYmd, formatDay,
 } from './dates.js';
 
 // Each test file runs in its own process, so switching TZ here is isolated.
@@ -99,4 +99,10 @@ test('effectiveMonth: current year uses today, past is 12, future is 0', () => {
   assert.equal(effectiveMonth(2026, '2026-01-01'), 1);
   assert.equal(effectiveMonth(2025, '2026-11-16'), 12);
   assert.equal(effectiveMonth(2027, '2026-11-16'), 0);
+});
+
+test('formatDay drops the year only when it is today’s year', () => {
+  assert.equal(formatDay('2026-12-03', '2026-11-16'), 'dec 3');
+  assert.equal(formatDay('2027-01-31', '2026-11-16'), 'jan 31, 2027');
+  assert.equal(formatDay('2025-12-31', '2026-01-01'), 'dec 31, 2025');
 });

@@ -93,6 +93,15 @@ export function monthEnd(y, m) {
   return toYmd(y, m, daysInMonth(y, m));
 }
 
+const MONTH_SHORT = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/** 'dec 3' for a date in today's year, 'dec 3, 2027' otherwise. */
+export function formatDay(s, today) {
+  const { y, m, d } = parseYmd(s);
+  const label = `${MONTH_SHORT[m - 1]} ${d}`;
+  return parseYmd(today).y === y ? label : `${label}, ${y}`;
+}
+
 /** SPEC §7 month M for year Y: today's month, 12 for a past year, 0 for a future year. */
 export function effectiveMonth(year, today) {
   const { y, m } = parseYmd(today);
